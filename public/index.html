@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Playwright Test Runner</title>
+    <!-- CodeMirror for code editor -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+    <!-- Bootstrap for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+        }
+        .editor-container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            height: 400px;
+        }
+        .CodeMirror {
+            height: 100% !important;
+        }
+        .output-container {
+            background-color: #212529;
+            color: #f8f9fa;
+            border-radius: 5px;
+            height: 200px;
+            overflow: auto;
+            padding: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .browser-container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fff;
+            height: 400px;
+            overflow: hidden;
+            position: relative;
+        }
+        .browser-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .status-bar {
+            background-color: #495057;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .run-btn {
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }
+        .example-btn {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        h1 {
+            color: #212529;
+            margin-bottom: 30px;
+        }
+        .step-controls {
+            margin-top: 10px;
+        }
+        .step-btn {
+            margin-right: 5px;
+        }
+        .step-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+            background-color: #f8f9fa;
+        }
+        .step-item {
+            cursor: pointer;
+            padding: 5px;
+            margin-bottom: 5px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+        .step-item:hover {
+            background-color: #e9ecef;
+        }
+        .step-item.active {
+            background-color: #0d6efd;
+            color: white;
+        }
+        .controls-panel {
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .url-bar {
+            margin-bottom: 10px;
+        }
+        .test-file-dropdown {
+            margin-bottom: 10px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">Interactive Playwright Test Runner</h1>
+        
+        <div class="status-bar">
+            <div id="status">Ready to run your Playwright test</div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h3>Test Script</h3>
+                <div class="mb-2">
+                    <select id="test-file-dropdown" class="form-select test-file-dropdown mb-2">
+                        <option value="">-- Select a test file --</option>
+                        <!-- Test files will be populated here -->
+                    </select>
+                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic Example</button>
+                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot Example</button>
+                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form Filling Example</button>
+                </div>
+                <div class="editor-container">
+                    <textarea id="code-editor"></textarea>
+                </div>
+                <div class="d-flex mt-2">
+                    <button id="run-btn" class="btn btn-primary run-btn w-50 me-2">Parse Test</button>
+                    <button id="execute-btn" class="btn btn-success run-btn w-50" disabled>Execute Test</button>
+                </div>
+                <h3>Test Steps</h3>
+                <div class="step-list" id="step-list">
+                    <div class="text-muted">No steps parsed yet. Click "Parse Test" to extract steps from your test script.</div>
+                </div>
+                <div class="step-controls">
+                    <button id="step-next" class="btn btn-sm btn-primary step-btn" disabled>Run Next Step</button>
+                    <button id="run-all" class="btn btn-sm btn-success step-btn" disabled>Run All Steps</button>
+                    <button id="reset-steps" class="btn btn-sm btn-warning step-btn" disabled>Reset</button>
+                </div>
+                <h3>Output</h3>
+                <div class="output-container" id="output"></div>
+            </div>
+            
+            <div class="col-md-6">
+                <h3>Interactive Browser</h3>
+                <div class="controls-panel">
+                    <div class="input-group url-bar">
+                        <input type="text" id="url-input" class="form-control" placeholder="Enter URL to navigate">
+                        <button class="btn btn-outline-secondary" id="navigate-btn">Go</button>
+                    </div>
+                    <div class="d-flex">
+                        <button id="manual-mode-btn" class="btn btn-sm btn-outline-primary me-2">Toggle Manual Mode</button>
+                        <span class="text-muted mt-1 small">Manual mode lets you interact directly with the browser</span>
+                    </div>
+                </div>
+                <div class="browser-container" id="browser-container">
+                    <iframe src="about:blank" class="browser-iframe" id="browser-frame"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- CodeMirror -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+    <!-- Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Initialize CodeMirror
+        const codeEditor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+            mode: 'javascript',
+            theme: 'dracula',
+            lineNumbers: true,
+            indentUnit: 2,
+            tabSize: 2,
+            autoCloseBrackets: true,
+            matchBrackets: true
+        });
+        
+        // Set some default code
+        codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Basic test', async ({ page }) => {
+  console.log('Starting basic test');
+  
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  console.log('Navigated to Playwright website');
+  
+  // Expect the title to contain "Playwright"
+  await expect(page).toHaveTitle(/Playwright/);
+  console.log('Title contains Playwright');
+  
+  // Click the Get Started link
+  const getStartedLink = page.getByRole('link', { name: 'Get started' });
+  await getStartedLink.waitFor({ state: 'visible' });
+  console.log('Get started link is visible');
+  
+  await getStartedLink.click();
+  console.log('Clicked Get started link');
+  
+  // Verify we're on the installation page
+  await expect(page).toHaveURL(/.*installation/);
+  console.log('URL contains installation');
+  
+  // Find the installation heading
+  const heading = page.getByRole('heading', { name: 'Installation' });
+  await heading.waitFor();
+  console.log('Found Installation heading');
+  
+  console.log('Test executed successfully!');
+});`);
+        
+        // Socket.io connection
+        const socket = io();
+        
+        // Elements
+        const outputContainer = document.getElementById('output');
+        const statusElement = document.getElementById('status');
+        const runButton = document.getElementById('run-btn');
+        const executeButton = document.getElementById('execute-btn');
+        const stepNextButton = document.getElementById('step-next');
+        const runAllButton = document.getElementById('run-all');
+        const resetStepsButton = document.getElementById('reset-steps');
+        const stepList = document.getElementById('step-list');
+        const browserFrame = document.getElementById('browser-frame');
+        const urlInput = document.getElementById('url-input');
+        const navigateBtn = document.getElementById('navigate-btn');
+        const manualModeBtn = document.getElementById('manual-mode-btn');
+        const testFileDropdown = document.getElementById('test-file-dropdown');
+        
+        // State
+        let testSteps = [];
+        let currentStepIndex = -1;
+        let isManualMode = false;
+        
+        // Initialize browser frame
+        browserFrame.src = 'browser.html';
+        
+        // Load test files from server
+        async function loadTestFiles() {
+            try {
+                const response = await fetch('/test-files');
+                const files = await response.json();
+                
+                // Populate dropdown
+                testFileDropdown.innerHTML = '<option value="">-- Select a test file --</option>';
+                
+                files.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file;
+                    option.textContent = file;
+                    testFileDropdown.appendChild(option);
+                });
+                
+                // Show message if no files
+                if (files.length === 0) {
+                    outputContainer.textContent += 'No test files found in the tests directory.\n';
+                } else {
+                    outputContainer.textContent += `Found ${files.length} test files.\n`;
+                }
+            } catch (error) {
+                console.error('Error loading test files:', error);
+                outputContainer.textContent += `Error loading test files: ${error.message}\n`;
+            }
+        }
+        
+        // Load test file content when selected
+        testFileDropdown.addEventListener('change', async () => {
+            const selectedFile = testFileDropdown.value;
+            
+            if (!selectedFile) return;
+            
+            try {
+                const response = await fetch(`/test-file/${selectedFile}`);
+                const content = await response.text();
+                
+                // Set content in editor
+                codeEditor.setValue(content);
+                outputContainer.textContent += `Loaded test file: ${selectedFile}\n`;
+                
+                // Reset state
+                testSteps = [];
+                currentStepIndex = -1;
+                updateStepList();
+                executeButton.disabled = true;
+                stepNextButton.disabled = true;
+                runAllButton.disabled = true;
+                resetStepsButton.disabled = true;
+            } catch (error) {
+                console.error('Error loading test file content:', error);
+                outputContainer.textContent += `Error loading test file content: ${error.message}\n`;
+            }
+        });
+        
+        // Load test files on page load
+        window.addEventListener('load', () => {
+            loadTestFiles();
+        });
+        
+        // Navigate button
+        navigateBtn.addEventListener('click', () => {
+            const url = urlInput.value.trim();
+            if (url) {
+                navigateTo(url);
+            }
+        });
+        
+        // Toggle manual mode
+        manualModeBtn.addEventListener('click', () => {
+            isManualMode = !isManualMode;
+            if (isManualMode) {
+                manualModeBtn.classList.add('btn-primary');
+                manualModeBtn.classList.remove('btn-outline-primary');
+                outputContainer.textContent += "Entered manual mode. You can interact directly with the browser.\n";
+            } else {
+                manualModeBtn.classList.remove('btn-primary');
+                manualModeBtn.classList.add('btn-outline-primary');
+                outputContainer.textContent += "Exited manual mode. Browser actions will be controlled by the test steps.\n";
+            }
+        });
+        
+        // Function to navigate the browser
+        function navigateTo(url) {
+            if (!url.startsWith('http')) {
+                url = 'https://' + url;
+            }
+            
+            // Send message to the browser iframe
+            browserFrame.contentWindow.postMessage({ type: 'navigate', url }, '*');
+            urlInput.value = url;
+            outputContainer.textContent += `Navigating to: ${url}\n`;
+        }
+        
+        // Socket events
+        socket.on('test-output', ({ data }) => {
+            outputContainer.textContent += data;
+            outputContainer.scrollTop = outputContainer.scrollHeight;
+        });
+        
+        socket.on('test-status', ({ status, exitCode }) => {
+            if (status === 'starting') {
+                statusElement.textContent = 'Test is running...';
+                runButton.disabled = true;
+                outputContainer.textContent = '';
+            } else if (status === 'completed') {
+                statusElement.textContent = 'Test completed successfully!';
+                runButton.disabled = false;
+            } else if (status === 'failed') {
+                statusElement.textContent = `Test failed with exit code ${exitCode}`;
+                runButton.disabled = false;
+            }
+        });
+        
+        // Listen for browser commands from server
+        socket.on('browser-command', (command) => {
+            // Send the command to the browser iframe
+            browserFrame.contentWindow.postMessage(command, '*');
+        });
+        
+        // Listen for messages from the browser iframe
+        window.addEventListener('message', function(event) {
+            const { type, url, success, error, action } = event.data;
+            
+            if (type === 'loaded') {
+                // Browser has loaded a page
+                urlInput.value = url;
+                outputContainer.textContent += `Page loaded: ${url}\n`;
+                statusElement.textContent = `Browser loaded: ${url}`;
+            } else if (type === 'action-result') {
+                // Result of an action
+                if (success) {
+                    outputContainer.textContent += `Action ${action} completed successfully\n`;
+                } else {
+                    outputContainer.textContent += `Action ${action} failed: ${error}\n`;
+                }
+                
+                // Auto-advance to next step if running all steps
+                if (runAllButton.dataset.running === 'true') {
+                    setTimeout(executeNextStep, 1000);
+                }
+            }
+        });
+        
+        // Run button event - Parse test
+        runButton.addEventListener('click', async () => {
+            const script = codeEditor.getValue();
+            outputContainer.textContent = '';
+            
+            try {
+                statusElement.textContent = 'Parsing test script...';
+                const response = await fetch('/parse-test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ script })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to parse test');
+                }
+                
+                const result = await response.json();
+                testSteps = result.steps;
+                
+                // Update the step list
+                updateStepList();
+                
+                // Enable execute button
+                executeButton.disabled = false;
+                stepNextButton.disabled = false;
+                runAllButton.disabled = false;
+                resetStepsButton.disabled = false;
+                
+                // Reset step index
+                currentStepIndex = -1;
+                
+                statusElement.textContent = `Parsed ${testSteps.length} steps from the test script`;
+                outputContainer.textContent += `Successfully parsed ${testSteps.length} steps from the test script\n`;
+            } catch (error) {
+                console.error('Error:', error);
+                statusElement.textContent = `Error: ${error.message}`;
+                outputContainer.textContent += `Error parsing test: ${error.message}\n`;
+            }
+        });
+        
+        // Execute button event - Run the test with the embedded browser
+        executeButton.addEventListener('click', () => {
+            startTestExecution();
+        });
+        
+        // Run next step button
+        stepNextButton.addEventListener('click', () => {
+            executeNextStep();
+        });
+        
+        // Run all steps button
+        runAllButton.addEventListener('click', () => {
+            if (runAllButton.dataset.running === 'true') {
+                // Stop running
+                runAllButton.dataset.running = 'false';
+                runAllButton.textContent = 'Run All Steps';
+                runAllButton.classList.remove('btn-danger');
+                runAllButton.classList.add('btn-success');
+                outputContainer.textContent += 'Stopping automatic step execution\n';
+            } else {
+                // Start running all steps
+                runAllButton.dataset.running = 'true';
+                runAllButton.textContent = 'Stop';
+                runAllButton.classList.remove('btn-success');
+                runAllButton.classList.add('btn-danger');
+                executeNextStep();
+            }
+        });
+        
+        // Reset steps button
+        resetStepsButton.addEventListener('click', () => {
+            currentStepIndex = -1;
+            updateStepList();
+            outputContainer.textContent += 'Test steps reset\n';
+            runAllButton.dataset.running = 'false';
+            runAllButton.textContent = 'Run All Steps';
+            runAllButton.classList.remove('btn-danger');
+            runAllButton.classList.add('btn-success');
+        });
+        
+        // Function to update the step list
+        function updateStepList() {
+            stepList.innerHTML = '';
+            
+            if (testSteps.length === 0) {
+                stepList.innerHTML = '<div class="text-muted">No steps parsed yet. Click "Parse Test" to extract steps from your test script.</div>';
+                return;
+            }
+            
+            testSteps.forEach((step, index) => {
+                const stepItem = document.createElement('div');
+                stepItem.className = 'step-item';
+                if (index === currentStepIndex) {
+                    stepItem.classList.add('active');
+                } else if (index < currentStepIndex) {
+                    stepItem.style.color = '#4caf50';
+                }
+                
+                let stepText = '';
+                if (step.type === 'goto') {
+                    stepText = `Navigate to: ${step.data.url}`;
+                } else if (step.type === 'click') {
+                    stepText = `Click: ${step.data.method}('${step.data.selector}')`;
+                } else if (step.type === 'fill') {
+                    stepText = `Fill: ${step.data.method}('${step.data.selector}') with "${step.data.value}"`;
+                }
+                
+                stepItem.textContent = `${index + 1}. ${stepText}`;
+                
+                // Click to execute this specific step
+                stepItem.addEventListener('click', () => {
+                    currentStepIndex = index - 1; // Set to previous step so next will be this one
+                    executeNextStep();
+                });
+                
+                stepList.appendChild(stepItem);
+            });
+        }
+        
+        // Function to start test execution
+        function startTestExecution() {
+            // Reset state
+            currentStepIndex = -1;
+            outputContainer.textContent = '';
+            statusElement.textContent = 'Starting test execution...';
+            
+            // Execute first step
+            executeNextStep();
+        }
+        
+        // Function to execute the next step
+        function executeNextStep() {
+            if (currentStepIndex >= testSteps.length - 1) {
+                outputContainer.textContent += 'Test completed! All steps executed.\n';
+                statusElement.textContent = 'Test completed successfully!';
+                runAllButton.dataset.running = 'false';
+                runAllButton.textContent = 'Run All Steps';
+                runAllButton.classList.remove('btn-danger');
+                runAllButton.classList.add('btn-success');
+                return;
+            }
+            
+            // Advance to next step
+            currentStepIndex++;
+            updateStepList();
+            
+            const step = testSteps[currentStepIndex];
+            
+            // Execute the step
+            outputContainer.textContent += `Executing step ${currentStepIndex + 1}: ${step.type}\n`;
+            
+            if (step.type === 'goto') {
+                navigateTo(step.data.url);
+                
+                // Auto-advance to next step after navigation completes
+                if (runAllButton.dataset.running === 'true') {
+                    setTimeout(executeNextStep, 3000);
+                }
+            } else if (step.type === 'click') {
+                // Convert the locator to a CSS selector (simplified version)
+                let selector;
+                if (step.data.method === 'locator') {
+                    selector = step.data.selector;
+                } else if (step.data.method === 'getByRole') {
+                    // This is a simplification, actual implementation would be more complex
+                    if (step.data.selector.includes('link')) {
+                        selector = `a`;
+                    } else {
+                        selector = step.data.selector;
+                    }
+                } else if (step.data.method === 'getByText') {
+                    selector = `:contains("${step.data.selector}")`;
+                }
+                
+                browserFrame.contentWindow.postMessage({
+                    type: 'action',
+                    action: 'click',
+                    selector: selector
+                }, '*');
+            } else if (step.type === 'fill') {
+                let selector;
+                if (step.data.method === 'locator') {
+                    selector = step.data.selector;
+                } else {
+                    selector = step.data.selector;
+                }
+                
+                browserFrame.contentWindow.postMessage({
+                    type: 'action',
+                    action: 'fill',
+                    selector: selector,
+                    value: step.data.value
+                }, '*');
+            }
+        }
+        
+        // Example code templates
+        function loadExample(type) {
+            switch (type) {
+                case 'basic':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Basic test', async ({ page }) => {
+  console.log('Starting basic test');
+  
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  console.log('Navigated to Playwright website');
+  
+  // Expect the title to contain "Playwright"
+  await expect(page).toHaveTitle(/Playwright/);
+  console.log('Title contains Playwright');
+  
+  // Click the Get Started link
+  const getStartedLink = page.getByRole('link', { name: 'Get started' });
+  await getStartedLink.waitFor({ state: 'visible' });
+  console.log('Get started link is visible');
+  
+  await getStartedLink.click();
+  console.log('Clicked Get started link');
+  
+  console.log('Test executed successfully!');
+});`);
+                    break;
+                case 'screenshot':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Screenshot example', async ({ page }) => {
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  
+  // Wait for the page to fully load
+  await page.waitForLoadState('networkidle');
+  
+  // Click on Docs
+  await page.getByRole('link', { name: 'Docs' }).click();
+  
+  // Verify we navigated to the docs page
+  await expect(page).toHaveURL(/.*docs.*/);
+});`);
+                    break;
+                case 'form':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Form filling example', async ({ page }) => {
+  console.log('Starting form filling example test');
+  
+  // Go to the TodoMVC app
+  await page.goto('https://demo.playwright.dev/todomvc');
+  console.log('Navigated to TodoMVC app');
+  
+  // Add a todo item
+  await page.locator('.new-todo').fill('Buy groceries');
+  await page.locator('.new-todo').press('Enter');
+  console.log('Added first todo item');
+  
+  // Add another todo item
+  await page.locator('.new-todo').fill('Feed the cat');
+  await page.locator('.new-todo').press('Enter');
+  console.log('Added second todo item');
+  
+  // Check the first todo item by clicking the checkbox
+  await page.locator('.todo-list li:nth-child(1) .toggle').click();
+  console.log('Checked first todo item as completed');
+  
+  // Filter for active items
+  await page.getByRole('link', { name: 'Active' }).click();
+  console.log('Clicked on Active filter');
+  
+  console.log('Test completed successfully!');
+});`);
+                    break;
+            }
+            
+            // Reset state
+            testSteps = [];
+            currentStepIndex = -1;
+            updateStepList();
+            executeButton.disabled = true;
+            stepNextButton.disabled = true;
+            runAllButton.disabled = true;
+            resetStepsButton.disabled = true;
+        }
+    </script>
+</body>
+</html> 
