@@ -1,4 +1,4 @@
-# Interactive Playwright Test Runner
+# Natrual Language Agent Builder
 
 This project provides an interactive web-based UI for Playwright tests with an embedded browser. It allows you to:
 

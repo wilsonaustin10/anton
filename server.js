@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const { parseTest } = require('./test-parser');
 const playwright = require('playwright');
+const { generateChatResponse } = require('./openai-client');
 
 const app = express();
 const server = http.createServer(app);
@@ -525,6 +526,36 @@ app.post('/run-test', (req, res) => {
   });
   
   return res.json({ success: true });
+});
+
+// Chat endpoint for OpenAI integration
+app.post('/api/chat', async (req, res) => {
+  const { message, history } = req.body;
+  
+  if (!message) {
+    return res.status(400).json({ error: 'No message provided' });
+  }
+  
+  // Check for OpenAI API key
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('OpenAI API key is not configured in .env file');
+    return res.status(500).json({ 
+      error: 'OpenAI API key is not configured',
+      response: "I'm sorry, the chat service is not available. The OpenAI API key is not configured." 
+    });
+  }
+  
+  try {
+    console.log('Processing chat message:', message.substring(0, 30) + '...');
+    const response = await generateChatResponse(message, history || []);
+    return res.json({ success: true, response });
+  } catch (error) {
+    console.error('Error generating chat response:', error);
+    return res.status(500).json({ 
+      error: error.message,
+      response: "I'm sorry, I encountered an error processing your request. Please try again later." 
+    });
+  }
 });
 
 // Default route
