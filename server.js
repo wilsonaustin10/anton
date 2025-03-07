@@ -29,9 +29,18 @@ if (!fs.existsSync(testDir)) {
 // Track active browser contexts
 let activeBrowser = null;
 let activePage = null;
+let browserScreenshotInterval = null;
+const screenshotInterval = 100; // milliseconds between screenshots (reduced from 200ms)
+let isCapturing = false;
+let errorCount = 0;
 
 // Clean up function for browser resources
 async function cleanupBrowserResources() {
+  if (browserScreenshotInterval) {
+    clearInterval(browserScreenshotInterval);
+    browserScreenshotInterval = null;
+  }
+  
   if (activePage) {
     try {
       await activePage.close();
@@ -49,103 +58,314 @@ async function cleanupBrowserResources() {
     }
     activeBrowser = null;
   }
+  
+  isCapturing = false;
+}
+
+// Initialize browser if not already running
+async function ensureBrowserInitialized() {
+  if (!activeBrowser) {
+    console.log('Initializing browser...');
+    
+    // Modern Chrome user agent that's less likely to be detected as a bot
+    const userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+    
+    // Determine if we should use headless mode based on environment
+    // In production or CI environments, use headless: "new" which is better at avoiding detection
+    // In development environments, we can use non-headless mode for better compatibility
+    const isProduction = process.env.NODE_ENV === 'production';
+    const isCI = !!process.env.CI;
+    
+    // Use enhanced headless mode ('new') by default, which is better at avoiding detection
+    // but allow overriding with environment variable
+    const headlessMode = process.env.BROWSER_HEADLESS === 'false' ? false : 
+                         process.env.BROWSER_HEADLESS === 'true' ? true : 
+                         isProduction || isCI ? 'new' : false;
+    
+    console.log(`Browser headless mode: ${headlessMode}`);
+    
+    activeBrowser = await playwright.chromium.launch({
+      headless: headlessMode,
+      args: [
+        '--disable-web-security', 
+        '--disable-features=IsolateOrigins,site-per-process', 
+        '--disable-site-isolation-trials',
+        '--disable-blink-features=AutomationControlled', // Prevents detection via automation flags
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--window-size=1280,800',
+        '--hide-scrollbars'
+      ]
+    });
+    
+    const context = await activeBrowser.newContext({
+      userAgent: userAgent,
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+      hasTouch: false,
+      javaScriptEnabled: true,
+      locale: 'en-US',
+      timezoneId: 'America/Los_Angeles',
+      geolocation: { longitude: -122.403, latitude: 37.789 }, // San Francisco coordinates
+      permissions: ['geolocation', 'notifications'],
+      // Set extra HTTP headers to appear more like a real browser
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+      }
+    });
+    
+    // Add browser fingerprint evasion script
+    await context.addInitScript(() => {
+      // Override the navigator properties commonly used for fingerprinting
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      
+      // Add a fake WebGL renderer and vendor for fingerprinting
+      const getParameter = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) {
+          return 'Intel Open Source Technology Center';
+        }
+        if (parameter === 37446) {
+          return 'Mesa DRI Intel(R) HD Graphics 630 (Kaby Lake GT2)';
+        }
+        return getParameter.apply(this, arguments);
+      };
+    });
+    
+    activePage = await context.newPage();
+    
+    // Navigate to a default page
+    try {
+      await activePage.goto('https://www.google.com');
+      console.log('Browser initialized with Google homepage');
+    } catch (error) {
+      console.error('Error navigating to default page:', error);
+    }
+  }
+  return { browser: activeBrowser, page: activePage };
+}
+
+// Function to start browser screenshot streaming
+async function startBrowserScreenshotStreaming(socket) {
+  if (isCapturing) {
+    console.log('Screenshot streaming already in progress, not starting a new one');
+    return; // Don't start multiple capture processes
+  }
+  
+  isCapturing = true;
+  console.log('Starting browser screenshot streaming...');
+  
+  try {
+    await ensureBrowserInitialized();
+    console.log('Browser is initialized, starting screenshot captures');
+    
+    // Add a longer delay to make sure the browser is fully initialized
+    console.log('Waiting 1000ms before starting screenshot interval...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Configure screenshot parameters for best quality
+    const screenshotOptions = {
+      type: 'jpeg',
+      quality: 85,
+      fullPage: false,
+      clip: { x: 0, y: 0, width: 1280, height: 800 },
+      omitBackground: false,
+      timeout: 5000
+    };
+    
+    // Position the browser window off-screen if we're in non-headless mode
+    // This avoids having the browser window visible to the user while still getting good screenshots
+    try {
+      if (activeBrowser && !process.env.HEADLESS) {
+        const windows = await activeBrowser.windows();
+        if (windows && windows.length > 0) {
+          // Move browser window off-screen but don't minimize it
+          // as minimizing can affect rendering quality
+          await windows[0].setBounds({ left: -10000, top: -10000 });
+        }
+      }
+    } catch (windowError) {
+      console.log('Note: Could not position browser window off-screen:', windowError.message);
+      // Non-fatal error, continue with screenshot capturing
+    }
+    
+    // Capture screenshots at regular intervals
+    browserScreenshotInterval = setInterval(async () => {
+      try {
+        if (!isCapturing) {
+          clearInterval(browserScreenshotInterval);
+          return;
+        }
+        
+        console.log('Capturing screenshot...');
+        const screenshot = await activePage.screenshot(screenshotOptions);
+        const url = await activePage.url();
+        console.log(`Captured screenshot of size ${screenshot.length} bytes`);
+        console.log(`Current page URL: ${url}`);
+        
+        // Send the screenshot data to the client
+        console.log('Emitting browser-screenshot event to client');
+        socket.emit('browser-screenshot', {
+          screenshot: screenshot.toString('base64'),
+          url: url
+        });
+        console.log('Screenshot sent to client');
+      } catch (error) {
+        console.error('Error capturing browser screenshot:', error);
+        
+        // If we consistently get errors, we might want to reinitialize the browser
+        errorCount++;
+        if (errorCount > 5) {
+          console.log('Too many errors, reinitializing browser');
+          await cleanupBrowserResources();
+          await ensureBrowserInitialized();
+          errorCount = 0;
+        }
+      }
+    }, 100); // Capture a screenshot every 100ms for smoother experience
+  } catch (error) {
+    console.error('Error in startBrowserScreenshotStreaming:', error);
+    isCapturing = false;
+  }
 }
 
 // Socket.io connection
 io.on('connection', (socket) => {
   console.log('A user connected');
   
+  // Start screenshot streaming when the client signals it's ready
+  socket.on('ready-for-screenshots', () => {
+    console.log('Client is ready for screenshots, starting streaming');
+    startBrowserScreenshotStreaming(socket);
+  });
+  
   // Handle client disconnection
   socket.on('disconnect', async () => {
     console.log('User disconnected');
-    await cleanupBrowserResources();
+    
+    // We don't close the browser on disconnect anymore, as it stays alive
+    // for the whole app session. But we do stop the screenshot streaming.
+    if (browserScreenshotInterval) {
+      clearInterval(browserScreenshotInterval);
+      browserScreenshotInterval = null;
+      isCapturing = false;
+    }
   });
   
-  // Handle browser navigation commands
+  // Handle browser navigation
   socket.on('browser-navigate', async (data) => {
     const { url } = data;
     
     try {
-      // Initialize browser if not already done
-      if (!activeBrowser) {
-        activeBrowser = await playwright.chromium.launch({
-          headless: false,
-          args: ['--start-maximized']
+      await ensureBrowserInitialized();
+      
+      // Show the loading indicator to the user
+      socket.emit('test-output', { data: `Navigating to: ${url}...\n` });
+      
+      // Configure navigation options with better timeout and waitUntil settings
+      const navigationOptions = {
+        waitUntil: 'networkidle', // Wait until network is idle
+        timeout: 30000, // Longer timeout for slow websites
+      };
+      
+      // Try to navigate to the URL
+      try {
+        await activePage.goto(url, navigationOptions);
+        
+        // Add a small delay after navigation completes to ensure full page initialization
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Check if page has an error message about unsupported browsers
+        const hasUnsupportedMessage = await activePage.evaluate(() => {
+          const text = document.body.innerText.toLowerCase();
+          return text.includes('browser not supported') || 
+                 text.includes('unsupported browser') || 
+                 text.includes('upgrade your browser');
         });
-        activePage = await activeBrowser.newPage();
+        
+        if (hasUnsupportedMessage) {
+          console.log('Browser compatibility issue detected on page');
+          socket.emit('test-output', { data: `Warning: The site may have detected our browser as unsupported.\n` });
+        }
+        
+        // Report success to the client
+        socket.emit('test-output', { data: `Successfully navigated to: ${url}\n` });
+      } catch (navigationError) {
+        console.error('Navigation error:', navigationError);
+        
+        // Check if the page partially loaded despite the error
+        const url = await activePage.url();
+        const title = await activePage.title().catch(() => 'Unknown');
+        
+        socket.emit('test-output', { 
+          data: `Navigation encountered an error: ${navigationError.message}\nPartially loaded: ${url} (${title})\n` 
+        });
       }
-      
-      // Navigate to the URL
-      await activePage.goto(url);
-      
-      // Send browser command to the client
-      io.emit('browser-command', {
-        type: 'navigate',
-        url: activePage.url()
-      });
-      
-      socket.emit('test-output', { data: `Navigated to: ${url}\n` });
     } catch (error) {
-      socket.emit('test-output', { data: `Navigation error: ${error.message}\n` });
+      console.error('Browser navigation error:', error);
+      socket.emit('test-output', { data: `Browser navigation error: ${error.message}\n` });
     }
   });
   
-  // Handle browser actions
-  socket.on('browser-action', async (data) => {
-    const { action, selector, value } = data;
-    
+  // Handle click events from the UI
+  socket.on('browser-click', async (data) => {
     try {
-      if (!activePage) {
-        throw new Error('Browser not initialized');
-      }
+      const { x, y } = data;
+      await ensureBrowserInitialized();
       
-      if (action === 'click') {
-        await activePage.click(selector);
-        socket.emit('test-output', { data: `Clicked element: ${selector}\n` });
-      } else if (action === 'fill') {
-        await activePage.fill(selector, value);
-        socket.emit('test-output', { data: `Filled ${selector} with "${value}"\n` });
-      }
-      
-      // Send success response
-      io.emit('browser-command', {
-        type: 'action-result',
-        action,
-        success: true
-      });
+      // Perform the click at the specified coordinates
+      await activePage.mouse.click(x, y);
+      socket.emit('test-output', { data: `Clicked at position: (${x}, ${y})\n` });
     } catch (error) {
-      socket.emit('test-output', { data: `Action error: ${error.message}\n` });
-      io.emit('browser-command', {
-        type: 'action-result',
-        action,
-        success: false,
-        error: error.message
-      });
+      socket.emit('test-output', { data: `Click error: ${error.message}\n` });
     }
   });
   
-  // Handle individual step execution
+  // Handle keyboard input from the UI
+  socket.on('browser-type', async (data) => {
+    try {
+      const { text } = data;
+      await ensureBrowserInitialized();
+      
+      // Type the text
+      await activePage.keyboard.type(text);
+      socket.emit('test-output', { data: `Typed text: ${text}\n` });
+    } catch (error) {
+      socket.emit('test-output', { data: `Type error: ${error.message}\n` });
+    }
+  });
+  
+  // Handle keyboard press events (Enter, Tab, etc.)
+  socket.on('browser-key', async (data) => {
+    try {
+      const { key } = data;
+      await ensureBrowserInitialized();
+      
+      // Press the key
+      await activePage.keyboard.press(key);
+      socket.emit('test-output', { data: `Pressed key: ${key}\n` });
+    } catch (error) {
+      socket.emit('test-output', { data: `Key press error: ${error.message}\n` });
+    }
+  });
+  
+  // Handle individual step execution with the real browser
   socket.on('run-step', async (data) => {
     const { step } = data;
     
     try {
-      if (!activeBrowser) {
-        activeBrowser = await playwright.chromium.launch({
-          headless: false,
-          args: ['--start-maximized']
-        });
-        activePage = await activeBrowser.newPage();
-      }
+      await ensureBrowserInitialized();
       
       if (step.type === 'goto') {
-        await activePage.goto(step.data.url);
+        await activePage.goto(step.data.url, { waitUntil: 'domcontentloaded' });
         socket.emit('test-output', { data: `Navigated to: ${step.data.url}\n` });
-        
-        // Send browser command to the client
-        io.emit('browser-command', {
-          type: 'navigate',
-          url: activePage.url()
-        });
       } else if (step.type === 'click') {
         // Handle different selector types
         let selector;
@@ -166,33 +386,13 @@ io.on('connection', (socket) => {
         
         await activePage.click(selector);
         socket.emit('test-output', { data: `Clicked element: ${selector}\n` });
-        
-        // Send success response
-        io.emit('browser-command', {
-          type: 'action-result',
-          action: 'click',
-          success: true
-        });
       } else if (step.type === 'fill') {
         const selector = step.data.method === 'locator' ? step.data.selector : step.data.selector;
         await activePage.fill(selector, step.data.value);
         socket.emit('test-output', { data: `Filled ${selector} with "${step.data.value}"\n` });
-        
-        // Send success response
-        io.emit('browser-command', {
-          type: 'action-result',
-          action: 'fill',
-          success: true
-        });
       }
     } catch (error) {
       socket.emit('test-output', { data: `Step execution error: ${error.message}\n` });
-      io.emit('browser-command', {
-        type: 'action-result',
-        action: step.type,
-        success: false,
-        error: error.message
-      });
     }
   });
 });
@@ -260,7 +460,7 @@ app.post('/run-test', (req, res) => {
   
   // Save script to a temporary test file
   const timestamp = Date.now();
-  const testFile = path.join(testDir, `test-${timestamp}.spec.js`);
+  const testFile = path.join(testDir, `temp-test.spec.js`);
   
   fs.writeFileSync(testFile, script);
   
@@ -342,21 +542,6 @@ app.post('/run-test', (req, res) => {
   
   return res.json({ success: true });
 });
-
-// CORS Proxy for fetching external URLs
-app.use('/proxy', createProxyMiddleware({
-  changeOrigin: true,
-  pathRewrite: (path) => {
-    return path.replace(/^\/proxy\//, '');
-  },
-  router: (req) => {
-    const url = req.query.url;
-    if (url && typeof url === 'string') {
-      return url.startsWith('http') ? url : `https://${url}`;
-    }
-    return 'https://example.com';
-  }
-}));
 
 // Default route
 app.get('*', (req, res) => {

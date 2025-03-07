@@ -9,11 +9,13 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
     <!-- Bootstrap for styling -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f8f9fa;
-            padding: 20px;
+            padding: 10px;
         }
         .container {
             max-width: 1400px;
@@ -22,7 +24,7 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             overflow: hidden;
-            height: 400px;
+            height: 300px;
         }
         .CodeMirror {
             height: 100% !important;
@@ -31,7 +33,7 @@
             background-color: #212529;
             color: #f8f9fa;
             border-radius: 5px;
-            height: 200px;
+            height: 150px;
             overflow: auto;
             padding: 10px;
             font-family: monospace;
@@ -41,7 +43,7 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             background-color: #fff;
-            height: 400px;
+            height: 600px;
             overflow: hidden;
             position: relative;
         }
@@ -64,10 +66,13 @@
         .example-btn {
             margin-right: 5px;
             margin-bottom: 5px;
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
         }
         h1 {
             color: #212529;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
+            font-size: 1.8rem;
         }
         .step-controls {
             margin-top: 10px;
@@ -111,6 +116,22 @@
             margin-bottom: 10px;
             width: 100%;
         }
+        /* Navigation button styles */
+        .nav-btn {
+            min-width: 40px;
+        }
+        .nav-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .bi {
+            font-size: 16px;
+        }
+        h3 {
+            font-size: 1.2rem;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
@@ -122,16 +143,18 @@
         </div>
         
         <div class="row">
-            <div class="col-md-6">
+            <div class="col-md-3">
                 <h3>Test Script</h3>
                 <div class="mb-2">
                     <select id="test-file-dropdown" class="form-select test-file-dropdown mb-2">
                         <option value="">-- Select a test file --</option>
                         <!-- Test files will be populated here -->
                     </select>
-                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic Example</button>
-                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot Example</button>
-                    <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form Filling Example</button>
+                    <div class="d-flex flex-wrap">
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic</button>
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot</button>
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form</button>
+                    </div>
                 </div>
                 <div class="editor-container">
                     <textarea id="code-editor"></textarea>
@@ -153,10 +176,13 @@
                 <div class="output-container" id="output"></div>
             </div>
             
-            <div class="col-md-6">
+            <div class="col-md-9">
                 <h3>Interactive Browser</h3>
                 <div class="controls-panel">
                     <div class="input-group url-bar">
+                        <button class="btn btn-outline-secondary nav-btn" id="back-btn" title="Back"><i class="bi bi-arrow-left"></i></button>
+                        <button class="btn btn-outline-secondary nav-btn" id="forward-btn" title="Forward"><i class="bi bi-arrow-right"></i></button>
+                        <button class="btn btn-outline-secondary nav-btn" id="refresh-btn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
                         <input type="text" id="url-input" class="form-control" placeholder="Enter URL to navigate">
                         <button class="btn btn-outline-secondary" id="navigate-btn">Go</button>
                     </div>
@@ -244,13 +270,79 @@ test('Basic test', async ({ page }) => {
         const navigateBtn = document.getElementById('navigate-btn');
         const manualModeBtn = document.getElementById('manual-mode-btn');
         const testFileDropdown = document.getElementById('test-file-dropdown');
+        const browserContainer = document.getElementById('browser-container');
         
         // State
         let testSteps = [];
         let currentStepIndex = -1;
         let isManualMode = false;
+        let browserHistory = {
+            urls: [],
+            currentIndex: -1
+        };
         
-        // Initialize browser frame
+        // Focus tracking for keyboard events
+        let isBrowserFocused = false;
+        
+        // Event to track when browser is focused
+        browserContainer.addEventListener('click', function() {
+            isBrowserFocused = true;
+            // Visual indication of focus
+            browserContainer.style.outline = '2px solid #0d6efd';
+        });
+        
+        // Blur when clicking elsewhere
+        document.addEventListener('click', function(e) {
+            if (!browserContainer.contains(e.target)) {
+                isBrowserFocused = false;
+                browserContainer.style.outline = 'none';
+            }
+        });
+        
+        // Capture keyboard events when browser is focused
+        document.addEventListener('keydown', function(e) {
+            if (!isBrowserFocused) return;
+            
+            if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || 
+                e.key === 'ArrowUp' || e.key === 'ArrowDown' || 
+                e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                // Special keys
+                browserFrame.contentWindow.postMessage({
+                    type: 'keyboard',
+                    data: {
+                        action: 'key',
+                        key: e.key
+                    }
+                }, '*');
+                
+                // Prevent default behavior (like tabbing out of the browser)
+                e.preventDefault();
+            } else if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+                // Regular character keys
+                // We'll let the browser frame handle these as they come in
+            }
+        });
+        
+        // Capture keyboard input for regular typing
+        document.addEventListener('keypress', function(e) {
+            if (!isBrowserFocused) return;
+            
+            // Only send printable characters
+            if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+                browserFrame.contentWindow.postMessage({
+                    type: 'keyboard',
+                    data: {
+                        action: 'type',
+                        text: e.key
+                    }
+                }, '*');
+                
+                // Prevent default behavior
+                e.preventDefault();
+            }
+        });
+        
+        // Initialize browser frame with streaming browser
         browserFrame.src = 'browser.html';
         
         // Load test files from server
@@ -312,6 +404,18 @@ test('Basic test', async ({ page }) => {
         // Load test files on page load
         window.addEventListener('load', () => {
             loadTestFiles();
+            
+            // Update UI to reflect that browser is ready for manual interaction
+            setTimeout(() => {
+                statusElement.textContent = 'Browser ready - Google homepage loaded';
+                outputContainer.textContent += "Browser initialized with Google homepage. You can interact with it manually or run tests.\n";
+                manualModeBtn.classList.add('btn-primary');
+                manualModeBtn.classList.remove('btn-outline-primary');
+                isManualMode = true;
+                
+                // Update URL input to match initial page
+                urlInput.value = 'https://www.google.com';
+            }, 2000); // Give the browser iframe time to initialize
         });
         
         // Navigate button
@@ -322,6 +426,75 @@ test('Basic test', async ({ page }) => {
             }
         });
         
+        // URL input - navigate on Enter
+        urlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const url = urlInput.value.trim();
+                if (url) {
+                    navigateTo(url);
+                }
+            }
+        });
+        
+        // Browser navigation buttons
+        const backBtn = document.getElementById('back-btn');
+        const forwardBtn = document.getElementById('forward-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        
+        backBtn.addEventListener('click', () => {
+            if (browserHistory.currentIndex > 0) {
+                browserHistory.currentIndex--;
+                const previousUrl = browserHistory.urls[browserHistory.currentIndex];
+                
+                // Navigate to previous URL using our navigation system
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: previousUrl }, '*');
+                urlInput.value = previousUrl;
+                outputContainer.textContent += `Navigating back to: ${previousUrl}\n`;
+                
+                // Also send to server if in manual mode
+                if (isManualMode) {
+                    socket.emit('browser-navigate', { url: previousUrl });
+                }
+                
+                // Update buttons
+                updateHistoryButtons();
+            }
+        });
+        
+        forwardBtn.addEventListener('click', () => {
+            if (browserHistory.currentIndex < browserHistory.urls.length - 1) {
+                browserHistory.currentIndex++;
+                const nextUrl = browserHistory.urls[browserHistory.currentIndex];
+                
+                // Navigate to next URL using our navigation system
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: nextUrl }, '*');
+                urlInput.value = nextUrl;
+                outputContainer.textContent += `Navigating forward to: ${nextUrl}\n`;
+                
+                // Also send to server if in manual mode
+                if (isManualMode) {
+                    socket.emit('browser-navigate', { url: nextUrl });
+                }
+                
+                // Update buttons
+                updateHistoryButtons();
+            }
+        });
+        
+        refreshBtn.addEventListener('click', () => {
+            const currentUrl = urlInput.value.trim();
+            if (currentUrl) {
+                // Refresh by reloading the current URL
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: currentUrl }, '*');
+                outputContainer.textContent += `Refreshing page: ${currentUrl}\n`;
+                
+                // Also send to server if in manual mode
+                if (isManualMode) {
+                    socket.emit('browser-navigate', { url: currentUrl });
+                }
+            }
+        });
+        
         // Toggle manual mode
         manualModeBtn.addEventListener('click', () => {
             isManualMode = !isManualMode;
@@ -329,6 +502,12 @@ test('Basic test', async ({ page }) => {
                 manualModeBtn.classList.add('btn-primary');
                 manualModeBtn.classList.remove('btn-outline-primary');
                 outputContainer.textContent += "Entered manual mode. You can interact directly with the browser.\n";
+                
+                // Ensure the current URL is synchronized with the backend
+                const currentUrl = urlInput.value.trim();
+                if (currentUrl) {
+                    socket.emit('browser-navigate', { url: currentUrl });
+                }
             } else {
                 manualModeBtn.classList.remove('btn-primary');
                 manualModeBtn.classList.add('btn-outline-primary');
@@ -342,10 +521,38 @@ test('Basic test', async ({ page }) => {
                 url = 'https://' + url;
             }
             
-            // Send message to the browser iframe
-            browserFrame.contentWindow.postMessage({ type: 'navigate', url }, '*');
-            urlInput.value = url;
+            // Show loading indicator
             outputContainer.textContent += `Navigating to: ${url}\n`;
+            
+            // Send message to the browser iframe
+            browserFrame.contentWindow.postMessage({ 
+                type: 'navigate', 
+                data: { url }
+            }, '*');
+            
+            // Add to history if this is a new navigation (not from history buttons)
+            if (browserHistory.currentIndex === browserHistory.urls.length - 1) {
+                // We're at the end of history, add this as a new entry
+                browserHistory.urls.push(url);
+                browserHistory.currentIndex++;
+            } else {
+                // We were somewhere in the middle of history, remove forward history
+                browserHistory.urls = browserHistory.urls.slice(0, browserHistory.currentIndex + 1);
+                browserHistory.urls.push(url);
+                browserHistory.currentIndex++;
+            }
+            
+            // Update URL input to match
+            urlInput.value = url;
+            
+            // Update history navigation buttons
+            updateHistoryButtons();
+        }
+        
+        // Function to update history navigation buttons
+        function updateHistoryButtons() {
+            backBtn.disabled = browserHistory.currentIndex <= 0;
+            forwardBtn.disabled = browserHistory.currentIndex >= browserHistory.urls.length - 1;
         }
         
         // Socket events
@@ -383,6 +590,16 @@ test('Basic test', async ({ page }) => {
                 urlInput.value = url;
                 outputContainer.textContent += `Page loaded: ${url}\n`;
                 statusElement.textContent = `Browser loaded: ${url}`;
+                
+                // Add URL to history if it's new
+                if (browserHistory.urls.length === 0 || browserHistory.urls[browserHistory.urls.length - 1] !== url) {
+                    // Add first-time URL to history if not already there
+                    if (browserHistory.urls.length === 0) {
+                        browserHistory.urls.push(url);
+                        browserHistory.currentIndex = 0;
+                    }
+                    updateHistoryButtons();
+                }
             } else if (type === 'action-result') {
                 // Result of an action
                 if (success) {
@@ -394,6 +611,15 @@ test('Basic test', async ({ page }) => {
                 // Auto-advance to next step if running all steps
                 if (runAllButton.dataset.running === 'true') {
                     setTimeout(executeNextStep, 1000);
+                }
+            } else if (type === 'frame-ready') {
+                // Browser frame is ready to receive messages
+                console.log('Browser frame is ready');
+                
+                // If we have a URL in the input, navigate to it
+                const initialUrl = urlInput.value.trim();
+                if (initialUrl) {
+                    navigateTo(initialUrl);
                 }
             }
         });
@@ -553,48 +779,15 @@ test('Basic test', async ({ page }) => {
             // Execute the step
             outputContainer.textContent += `Executing step ${currentStepIndex + 1}: ${step.type}\n`;
             
-            if (step.type === 'goto') {
-                navigateTo(step.data.url);
-                
-                // Auto-advance to next step after navigation completes
-                if (runAllButton.dataset.running === 'true') {
-                    setTimeout(executeNextStep, 3000);
-                }
-            } else if (step.type === 'click') {
-                // Convert the locator to a CSS selector (simplified version)
-                let selector;
-                if (step.data.method === 'locator') {
-                    selector = step.data.selector;
-                } else if (step.data.method === 'getByRole') {
-                    // This is a simplification, actual implementation would be more complex
-                    if (step.data.selector.includes('link')) {
-                        selector = `a`;
-                    } else {
-                        selector = step.data.selector;
-                    }
-                } else if (step.data.method === 'getByText') {
-                    selector = `:contains("${step.data.selector}")`;
-                }
-                
-                browserFrame.contentWindow.postMessage({
-                    type: 'action',
-                    action: 'click',
-                    selector: selector
-                }, '*');
-            } else if (step.type === 'fill') {
-                let selector;
-                if (step.data.method === 'locator') {
-                    selector = step.data.selector;
-                } else {
-                    selector = step.data.selector;
-                }
-                
-                browserFrame.contentWindow.postMessage({
-                    type: 'action',
-                    action: 'fill',
-                    selector: selector,
-                    value: step.data.value
-                }, '*');
+            // Send step to the server-side browser
+            socket.emit('run-step', { step });
+            
+            // Add a delay before checking for auto-advance
+            if (runAllButton.dataset.running === 'true') {
+                setTimeout(() => {
+                    // Auto-advance to next step after a delay
+                    executeNextStep();
+                }, step.type === 'goto' ? 3000 : 1000); // Longer delay for navigation
             }
         }
         
