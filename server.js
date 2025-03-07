@@ -32,7 +32,6 @@ let activePage = null;
 let browserScreenshotInterval = null;
 const screenshotInterval = 100; // milliseconds between screenshots (reduced from 200ms)
 let isCapturing = false;
-let errorCount = 0;
 
 // Clean up function for browser resources
 async function cleanupBrowserResources() {
@@ -67,76 +66,61 @@ async function ensureBrowserInitialized() {
   if (!activeBrowser) {
     console.log('Initializing browser...');
     
-    // Modern Chrome user agent that's less likely to be detected as a bot
-    const userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+    // Define a modern user agent string
+    const modernUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
     
-    // Determine if we should use headless mode based on environment
-    // In production or CI environments, use headless: "new" which is better at avoiding detection
-    // In development environments, we can use non-headless mode for better compatibility
-    const isProduction = process.env.NODE_ENV === 'production';
-    const isCI = !!process.env.CI;
-    
-    // Use enhanced headless mode ('new') by default, which is better at avoiding detection
-    // but allow overriding with environment variable
-    const headlessMode = process.env.BROWSER_HEADLESS === 'false' ? false : 
-                         process.env.BROWSER_HEADLESS === 'true' ? true : 
-                         isProduction || isCI ? 'new' : false;
-    
-    console.log(`Browser headless mode: ${headlessMode}`);
-    
+    // ========================= IMPORTANT - DO NOT MODIFY =========================
+    // The headless option must be a boolean value (true) for compatibility with the
+    // current Playwright version. Using string values like 'new' will cause errors.
+    // If upgrading Playwright in the future, ensure you test browser initialization
+    // thoroughly before deploying any changes to this configuration.
+    // =========================================================================== 
     activeBrowser = await playwright.chromium.launch({
-      headless: headlessMode,
+      headless: true, // Using boolean value for compatibility
       args: [
         '--disable-web-security', 
-        '--disable-features=IsolateOrigins,site-per-process', 
+        '--disable-features=IsolateOrigins,site-per-process',
         '--disable-site-isolation-trials',
-        '--disable-blink-features=AutomationControlled', // Prevents detection via automation flags
+        '--disable-features=BlockInsecurePrivateNetworkRequests',
+        '--disable-blink-features=AutomationControlled', // Prevent detection as automated browser
         '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--window-size=1280,800',
-        '--hide-scrollbars'
+        '--window-size=1280,800'
       ]
     });
+    // ========================= END CRITICAL SECTION =============================
     
+    // Create a browser context with specific options to avoid detection
     const context = await activeBrowser.newContext({
-      userAgent: userAgent,
+      userAgent: modernUserAgent,
       viewport: { width: 1280, height: 800 },
       deviceScaleFactor: 1,
       hasTouch: false,
+      defaultBrowserType: 'chromium',
       javaScriptEnabled: true,
-      locale: 'en-US',
-      timezoneId: 'America/Los_Angeles',
-      geolocation: { longitude: -122.403, latitude: 37.789 }, // San Francisco coordinates
-      permissions: ['geolocation', 'notifications'],
-      // Set extra HTTP headers to appear more like a real browser
-      extraHTTPHeaders: {
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
-      }
+      bypassCSP: true, // Bypass Content Security Policy
+      ignoreHTTPSErrors: true,
+      permissions: ['geolocation', 'notifications', 'camera', 'microphone']
     });
     
-    // Add browser fingerprint evasion script
+    // Add additional properties to avoid detection
     await context.addInitScript(() => {
-      // Override the navigator properties commonly used for fingerprinting
+      // Mask WebDriver
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
       
-      // Add a fake WebGL renderer and vendor for fingerprinting
-      const getParameter = WebGLRenderingContext.prototype.getParameter;
-      WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) {
-          return 'Intel Open Source Technology Center';
+      // Simulate normal plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+          return [1, 2, 3, 4, 5];
         }
-        if (parameter === 37446) {
-          return 'Mesa DRI Intel(R) HD Graphics 630 (Kaby Lake GT2)';
-        }
-        return getParameter.apply(this, arguments);
-      };
+      });
+      
+      // Simulate normal languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en', 'es']
+      });
+      
+      // Overwrite the automation property
+      window.navigator.chrome = { runtime: {} };
     });
     
     activePage = await context.newPage();
@@ -166,70 +150,50 @@ async function startBrowserScreenshotStreaming(socket) {
     await ensureBrowserInitialized();
     console.log('Browser is initialized, starting screenshot captures');
     
-    // Add a longer delay to make sure the browser is fully initialized
-    console.log('Waiting 1000ms before starting screenshot interval...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Configure screenshot parameters for best quality
-    const screenshotOptions = {
-      type: 'jpeg',
-      quality: 85,
-      fullPage: false,
-      clip: { x: 0, y: 0, width: 1280, height: 800 },
-      omitBackground: false,
-      timeout: 5000
-    };
-    
-    // Position the browser window off-screen if we're in non-headless mode
-    // This avoids having the browser window visible to the user while still getting good screenshots
-    try {
-      if (activeBrowser && !process.env.HEADLESS) {
-        const windows = await activeBrowser.windows();
-        if (windows && windows.length > 0) {
-          // Move browser window off-screen but don't minimize it
-          // as minimizing can affect rendering quality
-          await windows[0].setBounds({ left: -10000, top: -10000 });
-        }
-      }
-    } catch (windowError) {
-      console.log('Note: Could not position browser window off-screen:', windowError.message);
-      // Non-fatal error, continue with screenshot capturing
-    }
+    // Add a small delay to make sure the browser is fully initialized
+    console.log('Waiting 500ms before starting screenshot interval...');
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Capture screenshots at regular intervals
     browserScreenshotInterval = setInterval(async () => {
       try {
-        if (!isCapturing) {
+        if (!activePage) {
+          console.error('activePage is null, stopping screenshot interval');
           clearInterval(browserScreenshotInterval);
+          isCapturing = false;
           return;
         }
         
         console.log('Capturing screenshot...');
-        const screenshot = await activePage.screenshot(screenshotOptions);
-        const url = await activePage.url();
-        console.log(`Captured screenshot of size ${screenshot.length} bytes`);
-        console.log(`Current page URL: ${url}`);
+        const screenshot = await activePage.screenshot({ 
+          type: 'jpeg', 
+          quality: 80,
+          fullPage: false 
+        });
         
-        // Send the screenshot data to the client
+        // Convert to base64 for transmission
+        const base64Image = screenshot.toString('base64');
+        console.log(`Captured screenshot of size ${base64Image.length} bytes`);
+        
+        // Get current URL
+        const currentUrl = await activePage.url();
+        console.log(`Current page URL: ${currentUrl}`);
+        
+        // Send screenshot to client
         console.log('Emitting browser-screenshot event to client');
         socket.emit('browser-screenshot', {
-          screenshot: screenshot.toString('base64'),
-          url: url
+          screenshot: base64Image,
+          url: currentUrl
         });
+        
         console.log('Screenshot sent to client');
       } catch (error) {
         console.error('Error capturing browser screenshot:', error);
-        
-        // If we consistently get errors, we might want to reinitialize the browser
-        errorCount++;
-        if (errorCount > 5) {
-          console.log('Too many errors, reinitializing browser');
-          await cleanupBrowserResources();
-          await ensureBrowserInitialized();
-          errorCount = 0;
-        }
+        // Don't stop capturing on errors, might be transient
       }
-    }, 100); // Capture a screenshot every 100ms for smoother experience
+    }, screenshotInterval);
+    
+    console.log(`Screenshot interval started with ${screenshotInterval}ms delay`);
   } catch (error) {
     console.error('Error in startBrowserScreenshotStreaming:', error);
     isCapturing = false;
@@ -261,56 +225,36 @@ io.on('connection', (socket) => {
   
   // Handle browser navigation
   socket.on('browser-navigate', async (data) => {
-    const { url } = data;
+    const { url, action } = data;
     
     try {
       await ensureBrowserInitialized();
       
-      // Show the loading indicator to the user
-      socket.emit('test-output', { data: `Navigating to: ${url}...\n` });
-      
-      // Configure navigation options with better timeout and waitUntil settings
-      const navigationOptions = {
-        waitUntil: 'networkidle', // Wait until network is idle
-        timeout: 30000, // Longer timeout for slow websites
-      };
-      
-      // Try to navigate to the URL
-      try {
-        await activePage.goto(url, navigationOptions);
+      if (action === 'back') {
+        // Use the browser's back button functionality
+        await activePage.goBack();
+        const currentUrl = activePage.url();
+        socket.emit('test-output', { data: `Navigated back to: ${currentUrl}\n` });
         
-        // Add a small delay after navigation completes to ensure full page initialization
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Notify the client about the new URL after navigation
+        socket.emit('browser-url-change', { url: currentUrl });
+      } 
+      else if (action === 'forward') {
+        // Use the browser's forward button functionality
+        await activePage.goForward();
+        const currentUrl = activePage.url();
+        socket.emit('test-output', { data: `Navigated forward to: ${currentUrl}\n` });
         
-        // Check if page has an error message about unsupported browsers
-        const hasUnsupportedMessage = await activePage.evaluate(() => {
-          const text = document.body.innerText.toLowerCase();
-          return text.includes('browser not supported') || 
-                 text.includes('unsupported browser') || 
-                 text.includes('upgrade your browser');
-        });
-        
-        if (hasUnsupportedMessage) {
-          console.log('Browser compatibility issue detected on page');
-          socket.emit('test-output', { data: `Warning: The site may have detected our browser as unsupported.\n` });
-        }
-        
-        // Report success to the client
-        socket.emit('test-output', { data: `Successfully navigated to: ${url}\n` });
-      } catch (navigationError) {
-        console.error('Navigation error:', navigationError);
-        
-        // Check if the page partially loaded despite the error
-        const url = await activePage.url();
-        const title = await activePage.title().catch(() => 'Unknown');
-        
-        socket.emit('test-output', { 
-          data: `Navigation encountered an error: ${navigationError.message}\nPartially loaded: ${url} (${title})\n` 
-        });
+        // Notify the client about the new URL after navigation
+        socket.emit('browser-url-change', { url: currentUrl });
+      }
+      else {
+        // Navigate to the URL
+        await activePage.goto(url, { waitUntil: 'domcontentloaded' });
+        socket.emit('test-output', { data: `Navigated to: ${url}\n` });
       }
     } catch (error) {
-      console.error('Browser navigation error:', error);
-      socket.emit('test-output', { data: `Browser navigation error: ${error.message}\n` });
+      socket.emit('test-output', { data: `Navigation error: ${error.message}\n` });
     }
   });
   
@@ -334,23 +278,63 @@ io.on('connection', (socket) => {
       const { text } = data;
       await ensureBrowserInitialized();
       
-      // Type the text
+      // Type the text into the active page
       await activePage.keyboard.type(text);
-      socket.emit('test-output', { data: `Typed text: ${text}\n` });
+      
+      // Don't log every keystroke to avoid flooding the output
+      // socket.emit('test-output', { data: `Typed text: ${text}\n` });
     } catch (error) {
       socket.emit('test-output', { data: `Type error: ${error.message}\n` });
     }
   });
   
-  // Handle keyboard press events (Enter, Tab, etc.)
+  // Handle wheel/scroll events from the UI
+  socket.on('browser-wheel', async (data) => {
+    try {
+      const { deltaX, deltaY } = data;
+      await ensureBrowserInitialized();
+      
+      // Execute a mousewheel event in the page context
+      await activePage.mouse.wheel(deltaX, deltaY);
+      
+      // We don't send feedback for every scroll event to avoid flooding the output
+    } catch (error) {
+      console.error(`Scroll error: ${error.message}`);
+    }
+  });
+  
+  // Handle specific keyboard keys from the UI
   socket.on('browser-key', async (data) => {
     try {
       const { key } = data;
       await ensureBrowserInitialized();
       
-      // Press the key
-      await activePage.keyboard.press(key);
-      socket.emit('test-output', { data: `Pressed key: ${key}\n` });
+      // Handle special keys
+      if (key === 'Backspace') {
+        await activePage.keyboard.press('Backspace');
+      } else if (key === 'Delete') {
+        await activePage.keyboard.press('Delete');
+      } else if (key === 'Enter') {
+        await activePage.keyboard.press('Enter');
+      } else if (key === 'Tab') {
+        await activePage.keyboard.press('Tab');
+      } else if (key === 'Escape') {
+        await activePage.keyboard.press('Escape');
+      } else if (key === 'ArrowUp') {
+        await activePage.keyboard.press('ArrowUp');
+      } else if (key === 'ArrowDown') {
+        await activePage.keyboard.press('ArrowDown');
+      } else if (key === 'ArrowLeft') {
+        await activePage.keyboard.press('ArrowLeft');
+      } else if (key === 'ArrowRight') {
+        await activePage.keyboard.press('ArrowRight');
+      } else {
+        // Handle other keys
+        await activePage.keyboard.press(key);
+      }
+      
+      // Don't log every keystroke to avoid flooding the output
+      // socket.emit('test-output', { data: `Pressed key: ${key}\n` });
     } catch (error) {
       socket.emit('test-output', { data: `Key press error: ${error.message}\n` });
     }
@@ -547,6 +531,7 @@ app.post('/run-test', (req, res) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

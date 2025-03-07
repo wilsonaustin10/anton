@@ -95,6 +95,34 @@ The UI includes several example tests:
 - **Parsing**: Babel for JavaScript parsing
 - **Proxy**: HTTP-Proxy-Middleware for CORS handling
 
+## Important Configuration Notes
+
+### Browser Initialization
+
+The application uses a specific browser configuration that must be maintained for proper functionality:
+
+```javascript
+// CRITICAL: This configuration must not be changed without thorough testing
+activeBrowser = await playwright.chromium.launch({
+  headless: true, // Must be boolean true, not string 'new'
+  args: [
+    '--disable-web-security',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--disable-site-isolation-trials',
+    '--disable-features=BlockInsecurePrivateNetworkRequests',
+    '--disable-blink-features=AutomationControlled',
+    '--no-sandbox',
+    '--window-size=1280,800'
+  ]
+});
+```
+
+**IMPORTANT:** 
+1. The `headless` option must be a boolean value (`true`), not a string ('new').
+2. Using string values like `headless: 'new'` will cause browser initialization errors in the current Playwright version.
+3. Always test browser initialization thoroughly after upgrading Playwright or modifying this configuration.
+4. The browser arguments are carefully selected to maximize compatibility with various websites.
+
 ## License
 
 MIT

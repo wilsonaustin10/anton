@@ -232,6 +232,24 @@
             });
         });
         
+        // Handle wheel/scroll events
+        canvas.addEventListener('wheel', (event) => {
+            if (!isConnected) return;
+            
+            // Prevent the default scroll behavior on the canvas
+            event.preventDefault();
+            
+            // Scale the delta values
+            const deltaX = event.deltaX;
+            const deltaY = event.deltaY;
+            
+            // Send the wheel event to the server
+            socket.emit('browser-wheel', { 
+                deltaX: deltaX,
+                deltaY: deltaY
+            });
+        }, { passive: false });
+        
         // Handle keyboard events (bubble up from parent window)
         window.addEventListener('message', function(event) {
             const { type, data } = event.data;
