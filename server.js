@@ -285,6 +285,7 @@ io.on('connection', (socket) => {
       // Don't log every keystroke to avoid flooding the output
       // socket.emit('test-output', { data: `Typed text: ${text}\n` });
     } catch (error) {
+      console.error(`Type error: ${error.message}`);
       socket.emit('test-output', { data: `Type error: ${error.message}\n` });
     }
   });
@@ -330,13 +331,14 @@ io.on('connection', (socket) => {
       } else if (key === 'ArrowRight') {
         await activePage.keyboard.press('ArrowRight');
       } else {
-        // Handle other keys
+        // Handle any other key
         await activePage.keyboard.press(key);
       }
       
-      // Don't log every keystroke to avoid flooding the output
+      // Don't log every key press to avoid flooding the output
       // socket.emit('test-output', { data: `Pressed key: ${key}\n` });
     } catch (error) {
+      console.error(`Key press error: ${error.message}`);
       socket.emit('test-output', { data: `Key press error: ${error.message}\n` });
     }
   });
@@ -541,19 +543,74 @@ app.post('/api/chat', async (req, res) => {
     console.error('OpenAI API key is not configured in .env file');
     return res.status(500).json({ 
       error: 'OpenAI API key is not configured',
+      type: 'error',
       response: "I'm sorry, the chat service is not available. The OpenAI API key is not configured." 
     });
   }
   
   try {
     console.log('Processing chat message:', message.substring(0, 30) + '...');
-    const response = await generateChatResponse(message, history || []);
-    return res.json({ success: true, response });
+    const result = await generateChatResponse(message, history || []);
+    
+    // Format response based on the result type
+    if (result.type === 'orchestrated_response') {
+      // Orchestrated response with script and action sequence
+      console.log('Orchestrated response received, routing to appropriate destinations');
+      return res.json({
+        success: true,
+        type: 'orchestrated_response',
+        script: result.script,
+        actionSequence: result.actionSequence,
+        metadata: result.metadata,
+        response: result.message
+      });
+    } else if (result.type === 'script') {
+      // Script generation result
+      console.log('Script generation successful, returning to client');
+      return res.json({
+        success: true,
+        type: 'script',
+        script: result.script,
+        metadata: result.metadata,
+        response: result.message
+      });
+    } else if (result.type === 'error') {
+      // Error result - but still return as 200 to handle on client
+      console.error('Error in chat response:', result.message);
+      return res.json({
+        success: false,
+        type: 'error',
+        error: result.message,
+        response: result.message
+      });
+    } else {
+      // Regular chat response
+      console.log('Returning regular chat response');
+      return res.json({
+        success: true,
+        type: 'chat',
+        response: result.message
+      });
+    }
   } catch (error) {
-    console.error('Error generating chat response:', error);
-    return res.status(500).json({ 
+    console.error('Unhandled error in chat endpoint:', error);
+    console.error('Error details:', error.stack);
+    
+    // Provide more useful error information
+    let errorMessage = "I'm sorry, I encountered an error processing your request.";
+    if (error.message && error.message.includes('API key')) {
+      errorMessage += " There seems to be an issue with the OpenAI API key configuration.";
+    } else if (error.message && error.message.includes('rate limit')) {
+      errorMessage += " The API rate limit has been reached. Please try again in a moment.";
+    } else if (error.message && error.message.includes('timeout')) {
+      errorMessage += " The request timed out. You might try simplifying your query.";
+    }
+    
+    return res.status(200).json({ 
+      success: false,
+      type: 'error',
       error: error.message,
-      response: "I'm sorry, I encountered an error processing your request. Please try again later." 
+      response: errorMessage
     });
   }
 });

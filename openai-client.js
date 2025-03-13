@@ -4,6 +4,21 @@
 require('dotenv').config();
 const { OpenAI } = require('openai');
 
+// Lazy-load the script generator module to avoid circular dependencies
+let scriptGeneratorModule;
+function getScriptGenerator() {
+  if (!scriptGeneratorModule) {
+    try {
+      scriptGeneratorModule = require('./src/agent-generator/script-generator');
+      console.log('Script generator module loaded successfully');
+    } catch (loadError) {
+      console.error('Failed to load script generator module:', loadError);
+      scriptGeneratorModule = null;
+    }
+  }
+  return scriptGeneratorModule;
+}
+
 // Initialize OpenAI client with proper configuration
 let openai;
 try {
@@ -24,73 +39,136 @@ const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
 console.log(`Using OpenAI model: ${DEFAULT_MODEL}`);
 
 /**
- * Generate a response to a user message using the OpenAI API
- * @param {string} userMessage - The message from the user
- * @param {Array} history - Previous messages in the conversation
- * @returns {Promise<string>} - The assistant's response
+ * Direct call to OpenAI API for simple chat responses
+ * This is a simplified version that bypasses complex logic
  */
-async function generateChatResponse(userMessage, history = []) {
-  // Check if OpenAI client is initialized
+async function simpleChatResponse(userMessage) {
   if (!openai) {
-    console.error('OpenAI client not initialized. Check your API key configuration.');
-    return "I'm sorry, the chat service is not available. Please check your API key configuration.";
+    return {
+      type: 'error',
+      message: "OpenAI client not initialized. Please check your API key configuration."
+    };
   }
-
+  
   try {
-    console.log(`Generating response for message: "${userMessage.substring(0, 30)}..."`);
-    
-    // Convert history to the format expected by OpenAI
-    const messages = [...history];
-    
-    // Add system message for context
-    if (messages.length === 0 || !messages.some(msg => msg.role === 'system')) {
-      messages.unshift({
-        role: 'system',
-        content: `You are an AI assistant for the AutonoM3 Agent Builder, a tool for creating and running Playwright automation scripts.
-You help users write test scripts for web automation. Be concise, specific, and helpful with code examples where appropriate.
-Focus on:
-1. Playwright syntax and best practices
-2. Web automation techniques
-3. Test script debugging
-4. Selector strategies (CSS, XPath, text, role)
-5. Common automation scenarios`
-      });
-    }
-    
-    // Add the user's current message
-    messages.push({
-      role: 'user',
-      content: userMessage
-    });
-    
-    console.log('Calling OpenAI API with model:', DEFAULT_MODEL);
-    
-    // Call the OpenAI API
+    console.log('Using simple chat response fallback');
     const response = await openai.chat.completions.create({
       model: DEFAULT_MODEL,
-      messages: messages,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an assistant that helps with Playwright automation. Provide helpful, concise responses.'
+        },
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ],
       temperature: 0.7,
       max_tokens: 500
     });
     
-    console.log('Successfully received response from OpenAI API');
-    
-    // Return the response text
-    return response.choices[0].message.content.trim();
+    return {
+      type: 'chat',
+      message: response.choices[0].message.content.trim()
+    };
   } catch (error) {
-    console.error('Error calling OpenAI API:', error);
-    
-    // More specific error messages based on error type
-    if (error.name === 'AuthenticationError') {
-      return "Authentication error: The OpenAI API key is invalid or has expired. Please check your API key configuration.";
-    } else if (error.name === 'RateLimitError') {
-      return "Rate limit exceeded: The OpenAI API rate limit has been reached. Please try again later.";
-    } else if (error.name === 'TimeoutError') {
-      return "Request timed out: The OpenAI API request timed out. Please try again.";
+    console.error('Error in simple chat response:', error);
+    return {
+      type: 'error',
+      message: "I'm having trouble connecting to my knowledge base. Please try again later."
+    };
+  }
+}
+
+/**
+ * Generate a response to a user message using the OpenAI API
+ * @param {string} userMessage - The message from the user
+ * @param {Array} history - Previous messages in the conversation
+ * @returns {Promise<object>} - The response object with type and content
+ */
+async function generateChatResponse(userMessage, history = []) {
+  console.log(`Starting to process message: "${userMessage.substring(0, 30)}..."`);
+  
+  // Check if OpenAI client is initialized
+  if (!openai) {
+    console.error('OpenAI client not initialized. Check your API key configuration.');
+    return {
+      type: 'error',
+      message: "I'm sorry, the chat service is not available. Please check your API key configuration."
+    };
+  }
+
+  // Safety check for empty messages
+  if (!userMessage || userMessage.trim() === '') {
+    return {
+      type: 'error',
+      message: "Please provide a valid message or task."
+    };
+  }
+
+  try {
+    // SIMPLE MODE: Skip complex processing for simple queries or debug mode
+    if (userMessage.toLowerCase().includes('help') || 
+        userMessage.toLowerCase().includes('hello') ||
+        process.env.SIMPLE_MODE === 'true') {
+      return await simpleChatResponse(userMessage);
     }
     
-    // Provide a fallback response if the API call fails
-    return "I'm sorry, I encountered an issue connecting to my knowledge base. Please check your API key configuration or try again later.";
+    // Get the script generator module
+    const scriptGenerator = getScriptGenerator();
+    if (!scriptGenerator) {
+      console.error('Script generator module not available. Using simple chat fallback.');
+      return await simpleChatResponse(userMessage);
+    }
+    
+    try {
+      console.log('Attempting to generate script...');
+      const messageResult = await scriptGenerator.handleMessage(userMessage);
+      
+      // Check if we got an orchestrated_response directly (new format)
+      if (messageResult && messageResult.type === 'orchestrated_response') {
+        console.log('Received orchestrated response from script generator');
+        return messageResult;
+      }
+      
+      // For backward compatibility, handle 'script' type too
+      if (messageResult && messageResult.type === 'script') {
+        console.log('Script generation successful, converting to orchestrated response');
+        
+        // Route the script and action sequence to their respective destinations
+        return {
+          type: 'orchestrated_response',
+          script: messageResult.script,
+          actionSequence: messageResult.actionSequence || messageResult.message,
+          message: messageResult.message,
+          metadata: messageResult.metadata
+        };
+      }
+      
+      if (messageResult && messageResult.type === 'error') {
+        console.error('Error in script generation:', messageResult.message);
+        return messageResult;
+      }
+      
+      console.warn('Script generator returned an unexpected result type. Using fallback.');
+      return await simpleChatResponse(userMessage);
+      
+    } catch (scriptError) {
+      console.error('Caught error during script generation:', scriptError);
+      
+      // Use fallback for any script generation error
+      console.log('Using simple chat response due to script generation error');
+      return await simpleChatResponse(userMessage);
+    }
+  } catch (error) {
+    console.error('Unhandled error in message processing:', error);
+    
+    // Final fallback
+    return {
+      type: 'error',
+      message: "I encountered an unexpected error. Please try a different query or contact support."
+    };
   }
 }
 
