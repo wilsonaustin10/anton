@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Browser</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+        #browser-canvas {
+            width: 100%;
+            height: 100%;
+            cursor: default;
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: Arial, sans-serif;
+            z-index: 1000;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid white;
+            width: 40px;
+            height: 40px;
+            margin-right: 15px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">
+        <div class="loading-spinner"></div>
+        <div>Loading browser...</div>
+    </div>
+    <canvas id="browser-canvas"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Global variables
+        const canvas = document.getElementById('browser-canvas');
+        const ctx = canvas.getContext('2d');
+        const socket = io();
+        let currentUrl = '';
+        let isConnected = false;
+        let isLoading = true;
+        // Keep track of the last received image
+        let lastImage = null;
+        
+        // Set canvas size to match window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // If there's a current image, redraw it when resizing
+            if (lastImage) {
+                drawImageOnCanvas(lastImage);
+            }
+        }
+        
+        // Initialize canvas size
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Handle socket connection
+        socket.on('connect', () => {
+            isConnected = true;
+            console.log('Connected to server');
+            // Tell the server we're ready for screenshots
+            console.log('Sending ready-for-screenshots event to server');
+            socket.emit('ready-for-screenshots');
+        });
+        
+        socket.on('disconnect', () => {
+            isConnected = false;
+            console.log('Disconnected from server');
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('loading').innerHTML = `
+                <div>
+                    <h3>Connection Lost</h3>
+                    <p>Lost connection to the server. Please refresh the page to reconnect.</p>
+                    <button onclick="location.reload()">Refresh</button>
+                </div>
+            `;
+        });
+        
+        // Handle browser screenshots from the server
+        socket.on('browser-screenshot', (data) => {
+            console.log('Received browser-screenshot event from server');
+            const { screenshot, url } = data;
+            
+            console.log(`Received screenshot for URL: ${url}`);
+            console.log(`Screenshot data size: ${screenshot.length} bytes`);
+            
+            // Hide loading indicator once we start receiving screenshots
+            if (isLoading) {
+                console.log('First screenshot received, hiding loading indicator');
+                document.getElementById('loading').style.display = 'none';
+                isLoading = false;
+            }
+            
+            // Update current URL
+            if (url !== currentUrl) {
+                console.log(`Updating URL from ${currentUrl} to ${url}`);
+                currentUrl = url;
+                window.parent.postMessage({ type: 'loaded', url: currentUrl }, '*');
+            }
+            
+            // Draw the screenshot on the canvas
+            console.log('Creating image from screenshot data');
+            const image = new Image();
+            image.onload = function() {
+                console.log('Image loaded, drawing on canvas');
+                drawImageOnCanvas(image);
+                lastImage = image;
+            };
+            image.onerror = function(err) {
+                console.error('Error loading image:', err);
+            };
+            image.src = `data:image/jpeg;base64,${screenshot}`;
+        });
+        
+        // Function to draw image on canvas, preserving aspect ratio
+        function drawImageOnCanvas(image) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Calculate dimensions preserving aspect ratio
+            const canvasRatio = canvas.width / canvas.height;
+            const imageRatio = image.width / image.height;
+            
+            let drawWidth, drawHeight, offsetX, offsetY;
+            
+            if (canvasRatio > imageRatio) {
+                // Canvas is wider than the image
+                drawHeight = canvas.height;
+                drawWidth = image.width * (canvas.height / image.height);
+                offsetX = (canvas.width - drawWidth) / 2;
+                offsetY = 0;
+            } else {
+                // Canvas is taller than the image
+                drawWidth = canvas.width;
+                drawHeight = image.height * (canvas.width / image.width);
+                offsetX = 0;
+                offsetY = (canvas.height - drawHeight) / 2;
+            }
+            
+            // Draw image centered
+            ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+        }
+        
+        // Handle mouse events
+        canvas.addEventListener('click', (event) => {
+            if (!isConnected) return;
+            
+            // Get position relative to the canvas
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            const x = (event.clientX - rect.left) * scaleX;
+            const y = (event.clientY - rect.top) * scaleY;
+            
+            // Scale to the expected browser size (1280x800 set in server.js)
+            const browserWidth = 1280;
+            const browserHeight = 800;
+            
+            // Calculate position in the screenshot's aspect ratio
+            let scaledX, scaledY;
+            
+            if (lastImage) {
+                // Calculate the displayed image dimensions
+                const canvasRatio = canvas.width / canvas.height;
+                const imageRatio = lastImage.width / lastImage.height;
+                
+                let drawWidth, drawHeight, offsetX, offsetY;
+                
+                if (canvasRatio > imageRatio) {
+                    // Canvas is wider than the image
+                    drawHeight = canvas.height;
+                    drawWidth = lastImage.width * (canvas.height / lastImage.height);
+                    offsetX = (canvas.width - drawWidth) / 2;
+                    offsetY = 0;
+                    
+                    // Check if click is within the image area
+                    if (x < offsetX || x > offsetX + drawWidth) return;
+                    
+                    // Scale click position to browser dimensions
+                    scaledX = ((x - offsetX) / drawWidth) * browserWidth;
+                    scaledY = (y / drawHeight) * browserHeight;
+                } else {
+                    // Canvas is taller than the image
+                    drawWidth = canvas.width;
+                    drawHeight = lastImage.height * (canvas.width / lastImage.width);
+                    offsetX = 0;
+                    offsetY = (canvas.height - drawHeight) / 2;
+                    
+                    // Check if click is within the image area
+                    if (y < offsetY || y > offsetY + drawHeight) return;
+                    
+                    // Scale click position to browser dimensions
+                    scaledX = (x / drawWidth) * browserWidth;
+                    scaledY = ((y - offsetY) / drawHeight) * browserHeight;
+                }
+            } else {
+                // If no image yet, use simple scaling
+                scaledX = (x / canvas.width) * browserWidth;
+                scaledY = (y / canvas.height) * browserHeight;
+            }
+            
+            // Send the click event to the server
+            socket.emit('browser-click', { 
+                x: Math.round(scaledX), 
+                y: Math.round(scaledY)
+            });
+        });
+        
+        // Handle wheel/scroll events
+        canvas.addEventListener('wheel', (event) => {
+            if (!isConnected) return;
+            
+            // Prevent the default scroll behavior on the canvas
+            event.preventDefault();
+            
+            // Scale the delta values
+            const deltaX = event.deltaX;
+            const deltaY = event.deltaY;
+            
+            // Send the wheel event to the server
+            socket.emit('browser-wheel', { 
+                deltaX: deltaX,
+                deltaY: deltaY
+            });
+        }, { passive: false });
+        
+        // Handle keyboard events (bubble up from parent window)
+        window.addEventListener('message', function(event) {
+            const { type, data } = event.data;
+            
+            if (type === 'navigate') {
+                // Navigate to URL
+                document.getElementById('loading').style.display = 'flex';
+                isLoading = true;
+                socket.emit('browser-navigate', { url: data.url });
+            } else if (type === 'keyboard') {
+                // Handle keyboard input
+                if (data.action === 'type') {
+                    // Check if this is a single character or a longer string
+                    const text = data.text;
+                    
+                    // If it's a longer string (likely from direct input), log it
+                    if (text.length > 1) {
+                        console.log(`Typing text: "${text}"`);
+                    } else if (text.length === 1) {
+                        // Special character handling for single characters
+                        // This ensures shift+key combinations like @ are processed correctly
+                        console.log(`Typing character: ${text}`);
+                    }
+                    
+                    // Send the text to the server
+                    socket.emit('browser-type', { text: text });
+                    
+                    // For longer text, also send an Enter key press if requested
+                    if (text.length > 1 && data.sendEnter) {
+                        setTimeout(() => {
+                            socket.emit('browser-key', { key: 'Enter' });
+                        }, 100); // Small delay before Enter
+                    }
+                } else if (data.action === 'key') {
+                    socket.emit('browser-key', { key: data.key });
+                }
+            }
+        });
+        
+        // Visual indication of connection status
+        function updateConnectionStatus() {
+            if (isConnected) {
+                canvas.style.opacity = '1';
+            } else {
+                canvas.style.opacity = '0.5';
+            }
+            requestAnimationFrame(updateConnectionStatus);
+        }
+        updateConnectionStatus();
+        
+        // Indicate that the frame is ready
+        window.parent.postMessage({ type: 'frame-ready' }, '*');
+    </script>
+</body>
+</html> 

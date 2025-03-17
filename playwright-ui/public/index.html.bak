@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutonoM3 Agent Builder</title>
+    <!-- CodeMirror for code editor -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+    <!-- Bootstrap for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', 'Roboto', sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1600px;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        h3 {
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .editor-container {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            height: 300px;
+            position: relative;
+            transition: box-shadow 0.3s ease;
+        }
+        .editor-container .CodeMirror {
+            height: 100%;
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+        }
+        .run-btn {
+            margin-top: 10px;
+        }
+        .output-container {
+            background-color: #282c34;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            height: 200px;
+            overflow: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 5px;
+        }
+        .step-list {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .step-item {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .step-item:hover {
+            background-color: #f5f5f5;
+        }
+        .step-item.completed {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .step-item.current {
+            background-color: #cce5ff;
+            color: #004085;
+            font-weight: bold;
+        }
+        .step-controls {
+            margin-bottom: 20px;
+        }
+        .step-btn {
+            margin-right: 5px;
+        }
+        .browser-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+            height: 600px;
+            overflow: hidden;
+            position: relative;
+        }
+        .browser-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .controls-panel {
+            margin-bottom: 10px;
+        }
+        .url-bar {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .nav-btn {
+            width: 40px;
+        }
+        .test-file-dropdown {
+            margin-bottom: 10px;
+        }
+        .example-btn {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .chat-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        .chat-input-container {
+            display: flex;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-right: 5px;
+        }
+        .message-container {
+            margin-bottom: 10px;
+        }
+        .user-message {
+            background-color: #e7f5fe;
+            color: #0d6efd;
+            padding: 8px 12px;
+            border-radius: 18px;
+            border-bottom-right-radius: 4px;
+            max-width: 80%;
+            margin-left: auto;
+            margin-right: 5px;
+            word-wrap: break-word;
+        }
+        .assistant-message {
+            background-color: #f0f0f0;
+            padding: 8px 12px;
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+            max-width: 80%;
+            margin-right: auto;
+            margin-left: 5px;
+            word-wrap: break-word;
+        }
+        .code-block {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-x: auto;
+        }
+        
+        /* Highlight animation for script updates */
+        @keyframes highlight-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.5); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 123, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0); }
+        }
+        
+        .highlight-update {
+            animation: highlight-pulse 2s;
+            border-color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">AutonoM3 Agent Builder</h1>
+        
+        <div class="status-bar">
+            <div id="status">Ready to create your AutonoM3 agent</div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-3">
+                <!-- Chat Box Section -->
+                <h3>Chat Assistant</h3>
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="message-container">
+                            <div class="assistant-message">Hi! I'm your AutonoM3 agent building assistant. How can I help you today?</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" class="chat-input" placeholder="Type your message...">
+                        <button id="send-chat" class="btn btn-primary btn-sm">Send</button>
+                    </div>
+                </div>
+
+                <h3>Agent Script</h3>
+                <div class="mb-2">
+                    <select id="test-file-dropdown" class="form-select test-file-dropdown mb-2">
+                        <option value="">-- Select a test file --</option>
+                        <!-- Test files will be populated here -->
+                    </select>
+                    <div class="d-flex flex-wrap">
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic</button>
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot</button>
+                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form</button>
+                    </div>
+                </div>
+                <div class="editor-container">
+                    <textarea id="code-editor"></textarea>
+                </div>
+                <div class="d-flex mt-2">
+                    <button id="run-btn" class="btn btn-primary run-btn w-50 me-2">Create Agent</button>
+                    <button id="execute-btn" class="btn btn-success run-btn w-50" disabled>Run Agent</button>
+                </div>
+                <h3>Agent Steps</h3>
+                <div class="step-list" id="step-list">
+                    <div class="text-muted">No steps parsed yet. Click "Create Agent" to extract steps from your agent script.</div>
+                </div>
+                <div class="step-controls">
+                    <button id="step-next" class="btn btn-sm btn-primary step-btn" disabled>Run Next Step</button>
+                    <button id="run-all" class="btn btn-sm btn-success step-btn" disabled>Run All Steps</button>
+                    <button id="reset-steps" class="btn btn-sm btn-warning step-btn" disabled>Reset</button>
+                </div>
+                <h3>Output</h3>
+                <div class="output-container" id="output"></div>
+            </div>
+            
+            <div class="col-md-9">
+                <h3>Interactive Browser</h3>
+                <div class="controls-panel">
+                    <div class="input-group url-bar">
+                        <button class="btn btn-outline-secondary nav-btn" id="back-btn" title="Back"><i class="bi bi-arrow-left"></i></button>
+                        <button class="btn btn-outline-secondary nav-btn" id="forward-btn" title="Forward"><i class="bi bi-arrow-right"></i></button>
+                        <button class="btn btn-outline-secondary nav-btn" id="refresh-btn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+                        <input type="text" id="url-input" class="form-control" placeholder="Enter URL to navigate">
+                        <button class="btn btn-outline-secondary" id="navigate-btn">Go</button>
+                    </div>
+                    <div class="d-flex">
+                        <button id="manual-mode-btn" class="btn btn-sm btn-outline-primary me-2">Toggle Manual Mode</button>
+                        <span class="text-muted mt-1 small">Manual mode lets you interact directly with the browser</span>
+                    </div>
+                </div>
+                <div class="browser-container" id="browser-container">
+                    <iframe src="about:blank" class="browser-iframe" id="browser-frame"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- CodeMirror -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+    <!-- Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Initialize CodeMirror
+        const codeEditor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+            mode: 'javascript',
+            theme: 'dracula',
+            lineNumbers: true,
+            indentUnit: 2,
+            tabSize: 2,
+            autoCloseBrackets: true,
+            matchBrackets: true
+        });
+        
+        // Set some default code
+        codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Basic test', async ({ page }) => {
+  console.log('Starting basic test');
+  
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  console.log('Navigated to Playwright website');
+  
+  // Expect the title to contain "Playwright"
+  await expect(page).toHaveTitle(/Playwright/);
+  console.log('Title contains Playwright');
+  
+  // Click the Get Started link
+  const getStartedLink = page.getByRole('link', { name: 'Get started' });
+  await getStartedLink.waitFor({ state: 'visible' });
+  console.log('Get started link is visible');
+  
+  await getStartedLink.click();
+  console.log('Clicked Get started link');
+  
+  // Verify we're on the installation page
+  await expect(page).toHaveURL(/.*installation/);
+  console.log('URL contains installation');
+  
+  // Find the installation heading
+  const heading = page.getByRole('heading', { name: 'Installation' });
+  await heading.waitFor();
+  console.log('Found Installation heading');
+  
+  console.log('Test executed successfully!');
+});`);
+        
+        // Socket.io connection
+        const socket = io();
+        
+        // Elements
+        const outputContainer = document.getElementById('output');
+        const statusElement = document.getElementById('status');
+        const runButton = document.getElementById('run-btn');
+        const executeButton = document.getElementById('execute-btn');
+        const stepNextButton = document.getElementById('step-next');
+        const runAllButton = document.getElementById('run-all');
+        const resetStepsButton = document.getElementById('reset-steps');
+        const stepList = document.getElementById('step-list');
+        const browserFrame = document.getElementById('browser-frame');
+        const urlInput = document.getElementById('url-input');
+        const navigateBtn = document.getElementById('navigate-btn');
+        const manualModeBtn = document.getElementById('manual-mode-btn');
+        const testFileDropdown = document.getElementById('test-file-dropdown');
+        const browserContainer = document.getElementById('browser-container');
+        
+        // State
+        let testSteps = [];
+        let currentStepIndex = -1;
+        let isManualMode = false;
+        let browserHistory = {
+            urls: [],
+            currentIndex: -1
+        };
+        
+        // Focus tracking for keyboard events
+        let isBrowserFocused = false;
+        
+        // Event to track when browser is focused
+        browserContainer.addEventListener('click', function() {
+            if (!isBrowserFocused) {
+                isBrowserFocused = true;
+                // Visual indication of focus
+                browserContainer.style.outline = '3px solid #0d6efd';
+                statusElement.textContent = 'Browser is focused - you can now type directly into the browser';
+                updateBrowserFocusVisual();
+            }
+        });
+         
+        // Add button to focus/unfocus the browser
+        const focusButton = document.createElement('button');
+        focusButton.className = 'btn btn-sm btn-outline-info me-2';
+        focusButton.textContent = 'Focus Browser';
+        focusButton.onclick = function() {
+            isBrowserFocused = !isBrowserFocused;
+            if (isBrowserFocused) {
+                browserContainer.style.outline = '3px solid #0d6efd';
+                focusButton.textContent = 'Unfocus Browser';
+                focusButton.classList.remove('btn-outline-info');
+                focusButton.classList.add('btn-info');
+                statusElement.textContent = 'Browser is focused - you can now type directly into the browser';
+            } else {
+                browserContainer.style.outline = 'none';
+                focusButton.textContent = 'Focus Browser';
+                focusButton.classList.remove('btn-info');
+                focusButton.classList.add('btn-outline-info');
+                statusElement.textContent = '';
+            }
+            updateBrowserFocusVisual();
+        };
+         
+        // Add the button to the controls panel
+        const controlsPanel = document.querySelector('.controls-panel .d-flex');
+        controlsPanel.appendChild(focusButton);
+         
+        // Blur when clicking elsewhere
+        document.addEventListener('click', function(e) {
+            if (isBrowserFocused && !browserContainer.contains(e.target) && e.target !== focusButton) {
+                isBrowserFocused = false;
+                browserContainer.style.outline = 'none';
+                focusButton.textContent = 'Focus Browser';
+                focusButton.classList.remove('btn-info');
+                focusButton.classList.add('btn-outline-info');
+                updateBrowserFocusVisual();
+            }
+        });
+        
+        // Capture keyboard events when browser is focused
+        document.addEventListener('keydown', function(e) {
+            if (!isBrowserFocused) return;
+            
+            if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || 
+                e.key === 'ArrowUp' || e.key === 'ArrowDown' || 
+                e.key === 'ArrowLeft' || e.key === 'ArrowRight' || 
+                e.key === 'Backspace' || e.key === 'Delete') {
+                // Special keys
+                browserFrame.contentWindow.postMessage({
+                    type: 'keyboard',
+                    data: {
+                        action: 'key',
+                        key: e.key
+                    }
+                }, '*');
+                
+                // Prevent default behavior (like tabbing out of the browser)
+                e.preventDefault();
+            } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+                // Regular character keys - handle all key events, not just single characters
+                // This ensures special characters and combinations are captured
+                browserFrame.contentWindow.postMessage({
+                    type: 'keyboard',
+                    data: {
+                        action: 'type',
+                        text: e.key
+                    }
+                }, '*');
+                
+                // Prevent default behavior
+                e.preventDefault();
+            }
+        });
+        
+        // Add additional visual feedback for browser focus
+        function updateBrowserFocusVisual() {
+            if (isBrowserFocused) {
+                browserContainer.style.boxShadow = '0 0 0 3px rgba(0, 123, 255, 0.5)';
+                statusElement.style.color = '#007bff';
+            } else {
+                browserContainer.style.boxShadow = 'none';
+                statusElement.style.color = '';
+            }
+        }
+        
+        // Initialize browser frame with streaming browser
+        browserFrame.src = 'browser.html';
+        
+        // Load test files from server
+        async function loadTestFiles() {
+            try {
+                const response = await fetch('/test-files');
+                const files = await response.json();
+                
+                // Populate dropdown
+                testFileDropdown.innerHTML = '<option value="">-- Select a test file --</option>';
+                
+                files.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file;
+                    option.textContent = file;
+                    testFileDropdown.appendChild(option);
+                });
+                
+                // Show message if no files
+                if (files.length === 0) {
+                    outputContainer.textContent += 'No test files found in the tests directory.\n';
+                } else {
+                    outputContainer.textContent += `Found ${files.length} test files.\n`;
+                }
+            } catch (error) {
+                console.error('Error loading test files:', error);
+                outputContainer.textContent += `Error loading test files: ${error.message}\n`;
+            }
+        }
+        
+        // Load test file content when selected
+        testFileDropdown.addEventListener('change', async () => {
+            const selectedFile = testFileDropdown.value;
+            
+            if (!selectedFile) return;
+            
+            try {
+                const response = await fetch(`/test-file/${selectedFile}`);
+                const content = await response.text();
+                
+                // Set content in editor
+                codeEditor.setValue(content);
+                outputContainer.textContent += `Loaded test file: ${selectedFile}\n`;
+                
+                // Reset state
+                testSteps = [];
+                currentStepIndex = -1;
+                updateStepList();
+                executeButton.disabled = true;
+                stepNextButton.disabled = true;
+                runAllButton.disabled = true;
+                resetStepsButton.disabled = true;
+            } catch (error) {
+                console.error('Error loading test file content:', error);
+                outputContainer.textContent += `Error loading test file content: ${error.message}\n`;
+            }
+        });
+        
+        // Load test files on page load
+        window.addEventListener('load', () => {
+            loadTestFiles();
+            
+            // Update UI to reflect that browser is ready for manual interaction
+            setTimeout(() => {
+                statusElement.textContent = 'Browser ready - Google homepage loaded';
+                outputContainer.textContent += "Browser initialized with Google homepage. You can interact with it manually or run tests.\n";
+                manualModeBtn.classList.add('btn-primary');
+                manualModeBtn.classList.remove('btn-outline-primary');
+                isManualMode = true;
+                
+                // Update URL input to match initial page
+                urlInput.value = 'https://www.google.com';
+            }, 2000); // Give the browser iframe time to initialize
+        });
+        
+        // Navigate button
+        navigateBtn.addEventListener('click', () => {
+            const url = urlInput.value.trim();
+            if (url) {
+                navigateTo(url);
+            }
+        });
+        
+        // URL input - navigate on Enter
+        urlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const url = urlInput.value.trim();
+                if (url) {
+                    navigateTo(url);
+                }
+            }
+        });
+        
+        // Browser navigation buttons
+        const backBtn = document.getElementById('back-btn');
+        const forwardBtn = document.getElementById('forward-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        
+        backBtn.addEventListener('click', () => {
+            if (browserHistory.currentIndex > 0) {
+                browserHistory.currentIndex--;
+                const previousUrl = browserHistory.urls[browserHistory.currentIndex];
+                
+                // Navigate to previous URL using our navigation system
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: previousUrl }, '*');
+                urlInput.value = previousUrl;
+                outputContainer.textContent += `Navigating back to: ${previousUrl}\n`;
+                
+                // Send to server with action: 'back' to use the browser's native back functionality
+                socket.emit('browser-navigate', { url: previousUrl, action: 'back' });
+                
+                // Update buttons
+                updateHistoryButtons();
+            }
+        });
+        
+        forwardBtn.addEventListener('click', () => {
+            if (browserHistory.currentIndex < browserHistory.urls.length - 1) {
+                browserHistory.currentIndex++;
+                const nextUrl = browserHistory.urls[browserHistory.currentIndex];
+                
+                // Navigate to next URL using our navigation system
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: nextUrl }, '*');
+                urlInput.value = nextUrl;
+                outputContainer.textContent += `Navigating forward to: ${nextUrl}\n`;
+                
+                // Send to server with action: 'forward' to use the browser's native forward functionality
+                socket.emit('browser-navigate', { url: nextUrl, action: 'forward' });
+                
+                // Update buttons
+                updateHistoryButtons();
+            }
+        });
+        
+        refreshBtn.addEventListener('click', () => {
+            const currentUrl = urlInput.value.trim();
+            if (currentUrl) {
+                // Refresh by reloading the current URL
+                browserFrame.contentWindow.postMessage({ type: 'navigate', url: currentUrl }, '*');
+                outputContainer.textContent += `Refreshing page: ${currentUrl}\n`;
+                
+                // Also send to server if in manual mode
+                if (isManualMode) {
+                    socket.emit('browser-navigate', { url: currentUrl });
+                }
+            }
+        });
+        
+        // Toggle manual mode
+        manualModeBtn.addEventListener('click', () => {
+            isManualMode = !isManualMode;
+            if (isManualMode) {
+                manualModeBtn.classList.add('btn-primary');
+                manualModeBtn.classList.remove('btn-outline-primary');
+                outputContainer.textContent += "Entered manual mode. You can interact directly with the browser.\n";
+                
+                // Ensure the current URL is synchronized with the backend
+                const currentUrl = urlInput.value.trim();
+                if (currentUrl) {
+                    socket.emit('browser-navigate', { url: currentUrl });
+                }
+            } else {
+                manualModeBtn.classList.remove('btn-primary');
+                manualModeBtn.classList.add('btn-outline-primary');
+                outputContainer.textContent += "Exited manual mode. Browser actions will be controlled by the test steps.\n";
+            }
+        });
+        
+        // Function to navigate the browser
+        function navigateTo(url) {
+            if (!url.startsWith('http')) {
+                url = 'https://' + url;
+            }
+            
+            // Show loading indicator
+            outputContainer.textContent += `Navigating to: ${url}\n`;
+            
+            // Send message to the browser iframe
+            browserFrame.contentWindow.postMessage({ 
+                type: 'navigate', 
+                data: { url }
+            }, '*');
+            
+            // Add to history if this is a new navigation (not from history buttons)
+            if (browserHistory.currentIndex === browserHistory.urls.length - 1) {
+                // We're at the end of history, add this as a new entry
+                browserHistory.urls.push(url);
+                browserHistory.currentIndex++;
+            } else {
+                // We were somewhere in the middle of history, remove forward history
+                browserHistory.urls = browserHistory.urls.slice(0, browserHistory.currentIndex + 1);
+                browserHistory.urls.push(url);
+                browserHistory.currentIndex++;
+            }
+            
+            // Update URL input to match
+            urlInput.value = url;
+            
+            // Update history navigation buttons
+            updateHistoryButtons();
+        }
+        
+        // Function to update history navigation buttons
+        function updateHistoryButtons() {
+            backBtn.disabled = browserHistory.currentIndex <= 0;
+            forwardBtn.disabled = browserHistory.currentIndex >= browserHistory.urls.length - 1;
+        }
+        
+        // Listen for URL changes from the server after navigation events
+        socket.on('browser-url-change', (data) => {
+            const { url } = data;
+            urlInput.value = url;
+            
+            // Update browser history if needed
+            if (browserHistory.currentUrl !== url) {
+                // Update the current URL in history
+                browserHistory.currentUrl = url;
+                
+                // If we're displaying a new URL that's not already in the history
+                if (browserHistory.urls[browserHistory.currentIndex] !== url) {
+                    // Add it to history
+                    browserHistory.urls.splice(browserHistory.currentIndex + 1, 0, url);
+                    browserHistory.currentIndex++;
+                }
+                
+                // Update navigation buttons
+                updateHistoryButtons();
+            }
+        });
+        
+        // Auto-scroll output to bottom
+        function appendToOutput(message) {
+            outputContainer.textContent += message + '\n';
+            outputContainer.scrollTop = outputContainer.scrollHeight;
+        }
+        
+        // Socket events
+        socket.on('test-output', ({ data }) => {
+            appendToOutput(data);
+        });
+        
+        socket.on('test-status', ({ status, exitCode }) => {
+            if (status === 'starting') {
+                statusElement.textContent = 'Test is running...';
+                runButton.disabled = true;
+                outputContainer.textContent = '';
+            } else if (status === 'completed') {
+                statusElement.textContent = 'Test completed successfully!';
+                runButton.disabled = false;
+            } else if (status === 'failed') {
+                statusElement.textContent = `Test failed with exit code ${exitCode}`;
+                runButton.disabled = false;
+            }
+        });
+        
+        // Listen for browser commands from server
+        socket.on('browser-command', (command) => {
+            // Send the command to the browser iframe
+            browserFrame.contentWindow.postMessage(command, '*');
+        });
+        
+        // Listen for messages from the browser iframe
+        window.addEventListener('message', function(event) {
+            const { type, url, success, error, action } = event.data;
+            
+            if (type === 'loaded') {
+                // Browser has loaded a page
+                urlInput.value = url;
+                outputContainer.textContent += `Page loaded: ${url}\n`;
+                statusElement.textContent = `Browser loaded: ${url}`;
+                
+                // Add URL to history if it's new
+                if (browserHistory.urls.length === 0 || browserHistory.urls[browserHistory.urls.length - 1] !== url) {
+                    // Add first-time URL to history if not already there
+                    if (browserHistory.urls.length === 0) {
+                        browserHistory.urls.push(url);
+                        browserHistory.currentIndex = 0;
+                    }
+                    updateHistoryButtons();
+                }
+            } else if (type === 'action-result') {
+                // Result of an action
+                if (success) {
+                    outputContainer.textContent += `Action ${action} completed successfully\n`;
+                } else {
+                    outputContainer.textContent += `Action ${action} failed: ${error}\n`;
+                }
+                
+                // Auto-advance to next step if running all steps
+                if (runAllButton.dataset.running === 'true') {
+                    setTimeout(executeNextStep, 1000);
+                }
+            } else if (type === 'frame-ready') {
+                // Browser frame is ready to receive messages
+                console.log('Browser frame is ready');
+                
+                // If we have a URL in the input, navigate to it
+                const initialUrl = urlInput.value.trim();
+                if (initialUrl) {
+                    navigateTo(initialUrl);
+                }
+            }
+        });
+        
+        // Function to parse the test script and populate the steps list
+        async function parseTest() {
+            try {
+                const script = codeEditor.getValue();
+                if (!script || script.trim() === '') {
+                    console.warn('No script to parse');
+                    return;
+                }
+                
+                statusElement.textContent = 'Parsing script...';
+                const response = await fetch('/parse-test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ script })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('Error parsing script:', error);
+                    statusElement.textContent = 'Error parsing script';
+                    return;
+                }
+                
+                const result = await response.json();
+                testSteps = result.steps;
+                
+                // Update the step list
+                updateStepList();
+                
+                // Enable execute button
+                executeButton.disabled = false;
+                stepNextButton.disabled = false;
+                runAllButton.disabled = false;
+                resetStepsButton.disabled = false;
+                
+                // Reset step index
+                currentStepIndex = -1;
+                
+                statusElement.textContent = `Parsed ${testSteps.length} steps from the script`;
+                console.log(`Successfully parsed ${testSteps.length} steps from the script`);
+            } catch (error) {
+                console.error('Error during script parsing:', error);
+                statusElement.textContent = 'Error parsing script';
+            }
+        }
+        
+        // Run button event - Parse test
+        runButton.addEventListener('click', async () => {
+            const script = codeEditor.getValue();
+            outputContainer.textContent = '';
+            
+            try {
+                statusElement.textContent = 'Parsing test script...';
+                const response = await fetch('/parse-test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ script })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to parse test');
+                }
+                
+                const result = await response.json();
+                testSteps = result.steps;
+                
+                // Update the step list
+                updateStepList();
+                
+                // Enable execute button
+                executeButton.disabled = false;
+                stepNextButton.disabled = false;
+                runAllButton.disabled = false;
+                resetStepsButton.disabled = false;
+                
+                // Reset step index
+                currentStepIndex = -1;
+                
+                statusElement.textContent = `Parsed ${testSteps.length} steps from the test script`;
+                outputContainer.textContent += `Successfully parsed ${testSteps.length} steps from the test script\n`;
+            } catch (error) {
+                console.error('Error:', error);
+                statusElement.textContent = `Error: ${error.message}`;
+                outputContainer.textContent += `Error parsing test: ${error.message}\n`;
+            }
+        });
+        
+        // Execute button event - Run the test with the embedded browser
+        executeButton.addEventListener('click', () => {
+            startTestExecution();
+        });
+        
+        // Run next step button
+        stepNextButton.addEventListener('click', () => {
+            executeNextStep();
+        });
+        
+        // Run all steps button
+        runAllButton.addEventListener('click', () => {
+            if (runAllButton.dataset.running === 'true') {
+                // Stop running
+                runAllButton.dataset.running = 'false';
+                runAllButton.textContent = 'Run All Steps';
+                runAllButton.classList.remove('btn-danger');
+                runAllButton.classList.add('btn-success');
+                outputContainer.textContent += 'Stopping automatic step execution\n';
+            } else {
+                // Start running all steps
+                runAllButton.dataset.running = 'true';
+                runAllButton.textContent = 'Stop';
+                runAllButton.classList.remove('btn-success');
+                runAllButton.classList.add('btn-danger');
+                executeNextStep();
+            }
+        });
+        
+        // Reset steps button
+        resetStepsButton.addEventListener('click', () => {
+            currentStepIndex = -1;
+            updateStepList();
+            outputContainer.textContent += 'Test steps reset\n';
+            runAllButton.dataset.running = 'false';
+            runAllButton.textContent = 'Run All Steps';
+            runAllButton.classList.remove('btn-danger');
+            runAllButton.classList.add('btn-success');
+        });
+        
+        // Function to update the step list
+        function updateStepList() {
+            stepList.innerHTML = '';
+            
+            if (testSteps.length === 0) {
+                stepList.innerHTML = '<div class="text-muted">No steps parsed yet. Click "Create Agent" to extract steps from your agent script.</div>';
+                return;
+            }
+            
+            testSteps.forEach((step, index) => {
+                const stepItem = document.createElement('div');
+                stepItem.className = 'step-item';
+                if (index === currentStepIndex) {
+                    stepItem.classList.add('current');
+                } else if (index < currentStepIndex) {
+                    stepItem.classList.add('completed');
+                }
+                
+                let stepText = '';
+                if (step.type === 'goto') {
+                    stepText = `Navigate to: ${step.data.url}`;
+                } else if (step.type === 'click') {
+                    stepText = `Click: ${step.data.method}('${step.data.selector}')`;
+                } else if (step.type === 'fill') {
+                    stepText = `Fill: ${step.data.method}('${step.data.selector}') with "${step.data.value}"`;
+                }
+                
+                stepItem.textContent = `${index + 1}. ${stepText}`;
+                
+                // Click to execute this specific step
+                stepItem.addEventListener('click', () => {
+                    currentStepIndex = index - 1; // Set to previous step so next will be this one
+                    executeNextStep();
+                });
+                
+                stepList.appendChild(stepItem);
+            });
+        }
+        
+        // Function to start test execution
+        function startTestExecution() {
+            // Reset state
+            currentStepIndex = -1;
+            outputContainer.textContent = '';
+            statusElement.textContent = 'Starting test execution...';
+            
+            // Execute first step
+            executeNextStep();
+        }
+        
+        // Function to execute the next step
+        function executeNextStep() {
+            if (currentStepIndex >= testSteps.length - 1) {
+                outputContainer.textContent += 'Test completed! All steps executed.\n';
+                statusElement.textContent = 'Test completed successfully!';
+                runAllButton.dataset.running = 'false';
+                runAllButton.textContent = 'Run All Steps';
+                runAllButton.classList.remove('btn-danger');
+                runAllButton.classList.add('btn-success');
+                return;
+            }
+            
+            // Advance to next step
+            currentStepIndex++;
+            updateStepList();
+            
+            const step = testSteps[currentStepIndex];
+            
+            // Execute the step
+            outputContainer.textContent += `Executing step ${currentStepIndex + 1}: ${step.type}\n`;
+            
+            // Send step to the server-side browser
+            socket.emit('run-step', { step });
+            
+            // Add a delay before checking for auto-advance
+            if (runAllButton.dataset.running === 'true') {
+                setTimeout(() => {
+                    // Auto-advance to next step after a delay
+                    executeNextStep();
+                }, step.type === 'goto' ? 3000 : 1000); // Longer delay for navigation
+            }
+        }
+        
+        // Example code templates
+        function loadExample(type) {
+            switch (type) {
+                case 'basic':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Basic test', async ({ page }) => {
+  console.log('Starting basic test');
+  
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  console.log('Navigated to Playwright website');
+  
+  // Expect the title to contain "Playwright"
+  await expect(page).toHaveTitle(/Playwright/);
+  console.log('Title contains Playwright');
+  
+  // Click the Get Started link
+  const getStartedLink = page.getByRole('link', { name: 'Get started' });
+  await getStartedLink.waitFor({ state: 'visible' });
+  console.log('Get started link is visible');
+  
+  await getStartedLink.click();
+  console.log('Clicked Get started link');
+  
+  // Verify we're on the installation page
+  await expect(page).toHaveURL(/.*installation/);
+  console.log('URL contains installation');
+  
+  // Find the installation heading
+  const heading = page.getByRole('heading', { name: 'Installation' });
+  await heading.waitFor();
+  console.log('Found Installation heading');
+  
+  console.log('Test executed successfully!');
+});`);
+                    break;
+                case 'screenshot':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Screenshot example', async ({ page }) => {
+  // Go to Playwright website
+  await page.goto('https://playwright.dev/');
+  
+  // Wait for the page to fully load
+  await page.waitForLoadState('networkidle');
+  
+  // Click on Docs
+  await page.getByRole('link', { name: 'Docs' }).click();
+  
+  // Verify we navigated to the docs page
+  await expect(page).toHaveURL(/.*docs.*/);
+});`);
+                    break;
+                case 'form':
+                    codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('Form filling example', async ({ page }) => {
+  console.log('Starting form filling example test');
+  
+  // Go to the TodoMVC app
+  await page.goto('https://demo.playwright.dev/todomvc');
+  console.log('Navigated to TodoMVC app');
+  
+  // Add a todo item
+  await page.locator('.new-todo').fill('Buy groceries');
+  await page.locator('.new-todo').press('Enter');
+  console.log('Added first todo item');
+  
+  // Add another todo item
+  await page.locator('.new-todo').fill('Feed the cat');
+  await page.locator('.new-todo').press('Enter');
+  console.log('Added second todo item');
+  
+  // Check the first todo item by clicking the checkbox
+  await page.locator('.todo-list li:nth-child(1) .toggle').click();
+  console.log('Checked first todo item as completed');
+  
+  // Filter for active items
+  await page.getByRole('link', { name: 'Active' }).click();
+  console.log('Clicked on Active filter');
+  
+  console.log('Test completed successfully!');
+});`);
+                    break;
+            }
+            
+            // Reset state
+            testSteps = [];
+            currentStepIndex = -1;
+            updateStepList();
+            executeButton.disabled = true;
+            stepNextButton.disabled = true;
+            runAllButton.disabled = true;
+            resetStepsButton.disabled = true;
+        }
+
+        // Chat functionality
+        const chatInput = document.getElementById('chat-input');
+        const chatMessages = document.getElementById('chat-messages');
+        const sendChatButton = document.getElementById('send-chat');
+
+        // Store conversation history
+        let chatHistory = [];
+
+        // Function to add a message to the chat
+        function addMessage(text, isUser = false) {
+            const messageContainer = document.createElement('div');
+            messageContainer.className = 'message-container';
+            
+            const messageElement = document.createElement('div');
+            messageElement.className = isUser ? 'user-message' : 'assistant-message';
+            messageElement.textContent = text;
+            
+            messageContainer.appendChild(messageElement);
+            chatMessages.appendChild(messageContainer);
+            
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Store message in history
+            chatHistory.push({
+                role: isUser ? 'user' : 'assistant',
+                content: text
+            });
+            
+            // Limit history to last 10 messages to keep context manageable
+            if (chatHistory.length > 10) {
+                chatHistory = chatHistory.slice(chatHistory.length - 10);
+            }
+        }
+
+        // Process user message and generate a response via OpenAI API
+        async function processMessage(message) {
+            try {
+                statusElement.textContent = 'Generating response...';
+                
+                // Send the message to our OpenAI-powered API endpoint
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        history: chatHistory
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    console.error('API error:', data.error);
+                    // If the server provided a response message, use it
+                    if (data.response) {
+                        return { type: 'error', message: data.response };
+                    }
+                    throw new Error(data.error || 'Failed to get response');
+                }
+                
+                statusElement.textContent = 'Ready to create your AutonoM3 agent';
+                
+                // Check response type
+                if (data.type === 'orchestrated_response') {
+                    // Handle orchestrated response with script and action sequence
+                    console.log('Received orchestrated response:', data);
+                    
+                    // Populate the editor with the generated script
+                    codeEditor.setValue(data.script);
+                    
+                    // Parse the test after generating it
+                    parseTest();
+                    
+                    // Try to focus on the script editor to make it visible
+                    if (codeEditor) {
+                        codeEditor.focus();
+                        codeEditor.refresh();
+                        
+                        // Scroll to the script editor section
+                        document.querySelector('.editor-container').scrollIntoView({ behavior: 'smooth' });
+                        
+                        // Add a visual indicator that the script has been updated
+                        const editorContainer = document.querySelector('.editor-container');
+                        editorContainer.classList.add('highlight-update');
+                        setTimeout(() => {
+                            editorContainer.classList.remove('highlight-update');
+                        }, 2000);
+                    }
+                    
+                    // Create a custom button for this script
+                    createCustomScriptButton(data.script, data.metadata?.title || 'Generated Script');
+                    
+                    // Return the action sequence for chat display
+                    return { 
+                        type: 'orchestrated_response', 
+                        message: `${data.actionSequence || data.response || "I've generated a Playwright script for your task."}\n\n**The script has been automatically added to the Agent Script editor below. You can run it using the "Create Agent" button, followed by "Run Agent".**`,
+                        script: data.script,
+                        metadata: data.metadata
+                    };
+                } else if (data.type === 'script') {
+                    // Handle script generation response
+                    console.log('Received generated script:', data.script.substring(0, 50) + '...');
+                    
+                    // Populate the editor with the generated script
+                    codeEditor.setValue(data.script);
+                    
+                    // Parse the test after generating it
+                    parseTest();
+                    
+                    // Try to focus on the script editor to make it visible
+                    if (codeEditor) {
+                        codeEditor.focus();
+                        codeEditor.refresh();
+                        
+                        // Scroll to the script editor section
+                        document.querySelector('.editor-container').scrollIntoView({ behavior: 'smooth' });
+                        
+                        // Add a visual indicator that the script has been updated
+                        const editorContainer = document.querySelector('.editor-container');
+                        editorContainer.classList.add('highlight-update');
+                        setTimeout(() => {
+                            editorContainer.classList.remove('highlight-update');
+                        }, 2000);
+                    }
+                    
+                    // Create a custom button for this script
+                    createCustomScriptButton(data.script, data.metadata?.title || 'Generated Script');
+                    
+                    return { 
+                        type: 'script', 
+                        message: `${data.actionSequence || data.message || "I've generated a Playwright script for your task."}\n\n**The script has been automatically added to the Agent Script editor below. You can run it using the "Create Agent" button, followed by "Run Agent".**`,
+                        script: data.script
+                    };
+                } else {
+                    // Handle regular chat response
+                    return { type: 'chat', message: data.response };
+                }
+            } catch (error) {
+                console.error('Error getting chat response:', error);
+                statusElement.textContent = 'Ready to create your AutonoM3 agent';
+                
+                // Check if it's an API key issue
+                if (error.message && (
+                    error.message.includes('API key') || 
+                    error.message.includes('authentication') || 
+                    error.message.includes('Authorization')
+                )) {
+                    return { 
+                        type: 'error',
+                        message: "I'm sorry, there seems to be an issue with the OpenAI API configuration. Please check the API key in your .env file."
+                    };
+                }
+                
+                // Fallback responses for specific queries if API fails
+                const messageLower = message.toLowerCase();
+                if (messageLower.includes('create agent') || messageLower.includes('write agent')) {
+                    return { 
+                        type: 'fallback',
+                        message: "To create an agent: \n1. Write your code in the editor below\n2. Click 'Create Agent' to analyze it\n3. Use 'Run Next Step' or 'Run All Steps' to execute"
+                    };
+                } else if (messageLower.includes('playwright')) {
+                    return { 
+                        type: 'fallback',
+                        message: "Playwright is a framework for Web Testing and Automation. It allows you to automate Chrome, Firefox, and Safari with a single API."
+                    };
+                } else if (messageLower.includes('selector') || messageLower.includes('locate')) {
+                    return { 
+                        type: 'fallback',
+                        message: "Playwright supports many selector types: CSS selectors, XPath, text selectors, and more. For example: page.locator('#id'), page.getByRole('button', { name: 'Submit' })"
+                    };
+                }
+                
+                // General fallback
+                return { 
+                    type: 'error',
+                    message: `I'm sorry, I'm having trouble connecting to my knowledge base. Please try again later or ask a more specific question about Playwright or agent creation.`
+                };
+            }
+        }
+        
+        // Create a custom button for a generated script
+        function createCustomScriptButton(script, title) {
+            const buttonsContainer = document.querySelector('.d-flex.flex-wrap');
+            
+            // Create a short title if needed
+            const shortTitle = title.length > 15 ? title.substring(0, 12) + '...' : title;
+            
+            // Create new button
+            const newButton = document.createElement('button');
+            newButton.className = 'btn btn-sm btn-outline-success example-btn m-1';
+            newButton.title = title; // Full title on hover
+            newButton.textContent = shortTitle;
+            
+            // Store the script in the button's dataset
+            newButton.dataset.customScript = script;
+            
+            // Add click handler
+            newButton.addEventListener('click', () => {
+                // Set the editor value to this script
+                codeEditor.setValue(script);
+                
+                // Parse the test
+                parseTest();
+                
+                // Update status
+                statusElement.textContent = `Loaded custom script: ${title}`;
+            });
+            
+            // Add button to container
+            buttonsContainer.appendChild(newButton);
+            
+            return newButton;
+        }
+
+        // Event listener for send button
+        sendChatButton.addEventListener('click', async () => {
+            const message = chatInput.value.trim();
+            if (message) {
+                addMessage(message, true);
+                chatInput.value = '';
+
+                // Check for site generation request
+                const siteMatch = message.match(/(?:create|generate)\s+(?:agent|test)\s+(?:for|on)\s+([a-zA-Z0-9\s\.]+)/i);
+                if (siteMatch && siteMatch[1]) {
+                    const site = siteMatch[1].trim();
+                    loadExampleForSite(site);
+                    setTimeout(() => {
+                        addMessage(`I've generated a simple agent template for ${site}. You can modify it in the editor below.`);
+                    }, 500);
+                    return;
+                }
+                
+                // Process the message and get a response
+                statusElement.textContent = 'Thinking...';
+                sendChatButton.disabled = true;
+                chatInput.disabled = true;
+                
+                try {
+                    const result = await processMessage(message);
+                    addMessage(result.message);
+                    
+                    // If this was a script generation, highlight that it's now in the editor
+                    if (result.type === 'script') {
+                        statusElement.textContent = 'Script generated! You can run it with the "Run Agent" button.';
+                    }
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                    addMessage("I'm sorry, I encountered an error. Please try again.");
+                } finally {
+                    statusElement.textContent = 'Ready to create your AutonoM3 agent';
+                    sendChatButton.disabled = false;
+                    chatInput.disabled = false;
+                    chatInput.focus();
+                }
+            }
+        });
+
+        // Event listener for Enter key
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendChatButton.click();
+            }
+        });
+
+        // Generate a basic test template for a given site
+        function loadExampleForSite(site) {
+            let url = site;
+            // Add https:// if not present
+            if (!url.startsWith('http')) {
+                url = 'https://' + url;
+            }
+            
+            codeEditor.setValue(`// @ts-check
+const { test, expect } = require('@playwright/test');
+
+test('${site} test', async ({ page }) => {
+  console.log('Starting test for ${site}');
+  
+  // Navigate to ${site}
+  await page.goto('${url}');
+  console.log('Navigated to ${site}');
+  
+  // Wait for the page to load
+  await page.waitForLoadState('networkidle');
+  
+  // Verify the title
+  const title = await page.title();
+  console.log('Page title: ' + title);
+  
+  // You can add more interactions here:
+  // - await page.locator('#search').fill('your search term');
+  // - await page.locator('button[type="submit"]').click();
+  // - await page.getByRole('link', { name: 'Login' }).click();
+  
+  console.log('Test completed successfully!');
+});`);
+
+            // Parse the test after generating it
+            parseTest();
+        }
+    </script>
+</body>
+</html>
