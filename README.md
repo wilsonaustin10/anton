@@ -37,8 +37,9 @@ anton/
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/wilsonaustin10/anton.git
-cd anton
+git clone <repository-url>
+npx playwright install
+cd playwright-ui
 ```
 
 2. Set up the environment:
