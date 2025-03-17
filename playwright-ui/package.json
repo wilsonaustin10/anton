@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "fix-index": "node fix-index.js",
     "backup": "node -e \"require('fs').copyFileSync('public/index.html', 'public/index.html.bak'); console.log('Backup created!')\"",
-    "test-openai": "node test-openai.js"
+    "test-openai": "node test-openai.js",
+    "test-computer-use": "node test-computer-use.js"
   },
   "keywords": [
     "playwright",
@@ -28,9 +29,10 @@
     "dotenv": "^16.4.7",
     "express": "^4.18.2",
     "http-proxy-middleware": "^2.0.6",
-    "openai": "^4.20.0",
+    "openai": "^4.28.0",
     "playwright": "^1.39.0",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

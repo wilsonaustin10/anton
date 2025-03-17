@@ -9,15 +9,32 @@ const { Server } = require('socket.io');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const { parseTest } = require('./test-parser');
 const playwright = require('playwright');
-const { generateChatResponse } = require('./openai-client');
+const { generateChatResponse, getComputerUseActions } = require('./openai-client');
+
+// Import Computer Use components
+const { computerUseConfig } = require('./src/computer-use/config');
+const ScreenshotManager = require('./src/computer-use/screenshot-manager');
+const ActionExecutor = require('./src/computer-use/action-executor');
+const TaskSupervisor = require('./src/computer-use/task-supervisor');
+const SessionManager = require('./src/computer-use/session-manager');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Initialize Computer Use components
+const screenshotManager = new ScreenshotManager(computerUseConfig);
+const actionExecutor = new ActionExecutor(computerUseConfig);
+const taskSupervisor = new TaskSupervisor(
+  require('./openai-client'),
+  screenshotManager,
+  actionExecutor
+);
+const sessionManager = new SessionManager(computerUseConfig);
+
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/test-results', express.static(path.join(__dirname, 'test-results')));
 
@@ -43,6 +60,184 @@ app.post('/api/chat', async (req, res) => {
       type: 'error',
       message: 'Failed to generate response. Please try again.' 
     });
+  }
+});
+
+// Add Computer Use API endpoints
+
+// Start a new Computer Use task
+app.post('/api/computer-use/start', async (req, res) => {
+  try {
+    console.log('Received Computer Use task request:', req.body);
+    
+    // Validate input
+    const { taskDescription, userId } = req.body;
+    if (!taskDescription) {
+      return res.status(400).json({ 
+        error: 'Task description is required' 
+      });
+    }
+    
+    // Ensure browser is initialized
+    await ensureBrowserInitialized();
+    
+    // Create a session if userId is provided
+    let sessionId = null;
+    if (userId) {
+      sessionId = sessionManager.createSession(userId, {
+        taskDescription,
+        source: 'api_request'
+      });
+    }
+    
+    // Start a new task
+    const taskId = await taskSupervisor.startTask(
+      activePage, 
+      taskDescription,
+      {
+        ...req.body.options || {},
+        sessionId,
+        userId
+      }
+    );
+    
+    // Add task to session if session was created
+    if (sessionId) {
+      sessionManager.addTaskToSession(sessionId, taskId);
+      sessionManager.addSessionEvent(sessionId, 'task_started', { taskId });
+    }
+    
+    return res.json({ 
+      success: true, 
+      taskId,
+      sessionId,
+      message: `Computer Use task started with ID: ${taskId}`
+    });
+  } catch (error) {
+    console.error('Error starting Computer Use task:', error);
+    return res.status(500).json({ 
+      error: 'Failed to start Computer Use task',
+      details: error.message
+    });
+  }
+});
+
+// Check task status
+app.get('/api/computer-use/task/:taskId', (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const task = taskSupervisor.getTask(taskId);
+    
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    
+    return res.json({
+      taskId,
+      status: task.status,
+      description: task.description,
+      progress: {
+        actionsExecuted: task.actions.length,
+        screenshotsTaken: task.screenshots.length,
+        durationMs: Date.now() - task.startTime,
+        isComplete: ['completed', 'failed', 'aborted', 'timeout'].includes(task.status)
+      },
+      result: task.result
+    });
+  } catch (error) {
+    console.error('Error checking task status:', error);
+    return res.status(500).json({ error: 'Failed to check task status' });
+  }
+});
+
+// Pause a task
+app.post('/api/computer-use/pause/:taskId', (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const success = taskSupervisor.pauseTask(taskId);
+    
+    if (success) {
+      const task = taskSupervisor.getTask(taskId);
+      if (task && task.options && task.options.sessionId) {
+        sessionManager.addSessionEvent(task.options.sessionId, 'task_paused', { taskId });
+      }
+    }
+    
+    return res.json({
+      success,
+      message: `Task ${taskId} paused`
+    });
+  } catch (error) {
+    console.error('Error pausing task:', error);
+    return res.status(500).json({ error: 'Failed to pause task' });
+  }
+});
+
+// Resume a task
+app.post('/api/computer-use/resume/:taskId', (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const success = taskSupervisor.resumeTask(taskId);
+    
+    if (success) {
+      const task = taskSupervisor.getTask(taskId);
+      if (task && task.options && task.options.sessionId) {
+        sessionManager.addSessionEvent(task.options.sessionId, 'task_resumed', { taskId });
+      }
+    }
+    
+    return res.json({
+      success,
+      message: `Task ${taskId} resumed`
+    });
+  } catch (error) {
+    console.error('Error resuming task:', error);
+    return res.status(500).json({ error: 'Failed to resume task' });
+  }
+});
+
+// Abort a task
+app.post('/api/computer-use/abort/:taskId', (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const success = taskSupervisor.abortTask(taskId);
+    
+    if (success) {
+      const task = taskSupervisor.getTask(taskId);
+      if (task && task.options && task.options.sessionId) {
+        sessionManager.addSessionEvent(task.options.sessionId, 'task_aborted', { 
+          taskId,
+          reason: req.body.reason || 'user_request'
+        });
+      }
+    }
+    
+    return res.json({
+      success,
+      message: `Task ${taskId} aborted`
+    });
+  } catch (error) {
+    console.error('Error aborting task:', error);
+    return res.status(500).json({ error: 'Failed to abort task' });
+  }
+});
+
+// List all active tasks
+app.get('/api/computer-use/tasks', (req, res) => {
+  try {
+    const tasks = taskSupervisor.getAllTasks().map(task => ({
+      id: task.id,
+      description: task.description,
+      status: task.status,
+      startTime: task.startTime,
+      lastUpdated: task.lastUpdated,
+      actionsCount: task.actions.length
+    }));
+    
+    return res.json({ tasks });
+  } catch (error) {
+    console.error('Error listing tasks:', error);
+    return res.status(500).json({ error: 'Failed to list tasks' });
   }
 });
 
@@ -269,7 +464,7 @@ function exitHumanHandoffMode(socket) {
 
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('A user connected');
+  console.log('Client connected');
   
   // Start screenshot streaming when the client signals it's ready
   socket.on('ready-for-screenshots', () => {
@@ -279,7 +474,7 @@ io.on('connection', (socket) => {
   
   // Handle client disconnection
   socket.on('disconnect', async () => {
-    console.log('User disconnected');
+    console.log('Client disconnected');
     
     // We don't close the browser on disconnect anymore, as it stays alive
     // for the whole app session. But we do stop the screenshot streaming.
@@ -787,6 +982,60 @@ io.on('connection', (socket) => {
       socket.emit('test-output', { data: `Step execution error: ${error.message}\n` });
     }
   });
+  
+  // Add Computer Use specific events
+  socket.on('join-task', (taskId) => {
+    socket.join(`task-${taskId}`);
+    console.log(`Client joined task room: ${taskId}`);
+  });
+  
+  // Handle task events
+  taskSupervisor.on('taskStarted', (task) => {
+    io.to(`task-${task.id}`).emit('task-started', { 
+      taskId: task.id, 
+      description: task.description 
+    });
+  });
+  
+  taskSupervisor.on('screenshotCaptured', ({ taskId, screenshot }) => {
+    io.to(`task-${taskId}`).emit('task-screenshot', { 
+      taskId, 
+      screenshot: screenshot.base64, 
+      metadata: screenshot.metadata 
+    });
+  });
+  
+  taskSupervisor.on('actionExecuted', ({ taskId, action }) => {
+    io.to(`task-${taskId}`).emit('task-action', { taskId, action });
+  });
+  
+  taskSupervisor.on('actionError', ({ taskId, action, error }) => {
+    io.to(`task-${taskId}`).emit('task-action-error', { taskId, action, error: error.message });
+  });
+  
+  taskSupervisor.on('aiThinking', ({ taskId, thinking }) => {
+    io.to(`task-${taskId}`).emit('task-thinking', { taskId, thinking });
+  });
+  
+  taskSupervisor.on('taskStatusChanged', ({ taskId, status, task }) => {
+    io.to(`task-${taskId}`).emit('task-status-changed', { 
+      taskId, 
+      status, 
+      result: task.result
+    });
+  });
+  
+  taskSupervisor.on('taskPaused', ({ taskId }) => {
+    io.to(`task-${taskId}`).emit('task-paused', { taskId });
+  });
+  
+  taskSupervisor.on('taskResumed', ({ taskId }) => {
+    io.to(`task-${taskId}`).emit('task-resumed', { taskId });
+  });
+  
+  taskSupervisor.on('taskAborted', ({ taskId }) => {
+    io.to(`task-${taskId}`).emit('task-aborted', { taskId });
+  });
 });
 
 /**
@@ -852,6 +1101,114 @@ app.post('/parse-test', (req, res) => {
   }
 });
 
+// Endpoint to execute Computer Use actions directly on the active browser page
+app.post('/api/computer-use/execute', async (req, res) => {
+  try {
+    const { taskDescription, screenshotBase64, messages } = req.body;
+    
+    if (!taskDescription) {
+      return res.status(400).json({ error: 'Task description is required' });
+    }
+    
+    const result = await executeComputerUseOnActiveBrowser(taskDescription, screenshotBase64, messages);
+    return res.json(result);
+  } catch (error) {
+    console.error('Error executing Computer Use actions:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Execute Computer Use actions directly on the active browser page 
+ * For frontend integration with the embedded browser
+ * @param {string} taskDescription - The task description
+ * @param {string} screenshotBase64 - Base64 encoded screenshot (optional)
+ * @param {Array} messages - Conversation history (optional)
+ * @returns {Object} - Result of the execution
+ */
+async function executeComputerUseOnActiveBrowser(taskDescription, screenshotBase64, messages = []) {
+  try {
+    console.log('Executing Computer Use actions on active browser...');
+    
+    // Initialize browser if not already running
+    await ensureBrowserInitialized();
+    
+    if (!activePage) {
+      throw new Error('No active page available');
+    }
+    
+    // Capture screenshot if not provided
+    let screenshot = screenshotBase64;
+    if (!screenshot) {
+      const capturedScreenshot = await activePage.screenshot({
+        type: 'jpeg',
+        quality: 80,
+        fullPage: false
+      });
+      screenshot = capturedScreenshot.toString('base64');
+    }
+    
+    // Get actions from OpenAI
+    console.log('Requesting Computer Use actions from OpenAI...');
+    const aiResponse = await getComputerUseActions(taskDescription, screenshot, messages);
+    
+    // Execute first action if available
+    if (aiResponse.actions && aiResponse.actions.length > 0) {
+      console.log(`Executing ${aiResponse.actions.length} Computer Use actions...`);
+      
+      const results = [];
+      for (const action of aiResponse.actions) {
+        try {
+          const result = await actionExecutor.executeAction(activePage, action);
+          results.push({
+            action,
+            success: true,
+            result
+          });
+        } catch (actionError) {
+          console.error('Error executing action:', actionError);
+          results.push({
+            action,
+            success: false,
+            error: actionError.message
+          });
+          break; // Stop on first error
+        }
+      }
+      
+      return {
+        success: results.every(r => r.success),
+        actions: aiResponse.actions,
+        results,
+        thinking: aiResponse.thinking,
+        complete: aiResponse.complete
+      };
+    } else {
+      console.log('No actions received from OpenAI');
+      return {
+        success: false,
+        error: 'No actions received from OpenAI',
+        thinking: aiResponse.thinking
+      };
+    }
+  } catch (error) {
+    console.error('Error in Computer Use execution:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 server.listen(3000, () => {
   console.log('Server is running on port 3000');
 });
+
+// Export the necessary functions for external use
+module.exports = {
+  ensureBrowserInitialized,
+  getBrowserInfo: () => ({ activeBrowser, activePage }),
+  startBrowserScreenshotStreaming,
+  cleanupBrowserResources,
+  executeComputerUseOnActiveBrowser
+};

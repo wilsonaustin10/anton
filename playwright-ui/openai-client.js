@@ -31,7 +31,10 @@ try {
 
 // Default model to use
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+// Model for Computer Use
+const COMPUTER_USE_MODEL = process.env.OPENAI_COMPUTER_USE_MODEL || 'gpt-4o';
 console.log(`Using OpenAI model: ${DEFAULT_MODEL}`);
+console.log(`Using OpenAI Computer Use model: ${COMPUTER_USE_MODEL}`);
 
 // Simple template for LinkedIn scripts to use as fallback
 const LINKEDIN_SCRIPT_TEMPLATE = `
@@ -307,9 +310,258 @@ async function generateChatResponse(userMessage, history = []) {
   }
 }
 
+/**
+ * Request Computer Use actions from OpenAI
+ * @param {string} taskDescription - Description of the task
+ * @param {string} screenshot - Base64-encoded screenshot
+ * @param {Array} messages - Conversation history
+ * @returns {Object} - OpenAI response with actions
+ */
+async function getComputerUseActions(taskDescription, screenshot, messages = []) {
+  if (!openai) {
+    throw new Error('OpenAI client not initialized');
+  }
+  
+  console.log('Requesting Computer Use actions from OpenAI');
+  
+  try {
+    // Create system message with task description
+    const systemMessage = {
+      role: 'system',
+      content: `You are an AI assistant that helps users automate browser tasks. Your goal is to help the user complete the following task: ${taskDescription}.
+
+IMPORTANT: You MUST use the available function calls to perform actions. DO NOT just describe what to do - actually perform the actions by calling the appropriate functions.
+
+When analyzing the screenshot:
+1. Look for relevant elements like buttons, links, text fields
+2. Determine the best selector or coordinates to interact with elements
+3. Use the most appropriate function (click, type, etc.) to perform the needed action
+4. If you need to chain multiple actions, call them in the correct sequence
+
+When you believe the task is complete, include "TASK COMPLETE" in your response.
+
+Available actions:
+- click: Click on elements using selectors or coordinates
+- type: Type text into forms
+- navigate: Go to specific URLs
+- scroll: Scroll the page or specific elements
+- wait: Wait for elements or timeouts
+
+YOU MUST USE FUNCTION CALLS to perform actions. DO NOT just describe what to do - actually execute the actions using the provided functions.`
+    };
+    
+    // Prepare messages history
+    const messageHistory = [
+      systemMessage,
+      ...messages.filter(msg => msg.role !== 'system'), // Remove any existing system messages
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Here is the current state of the screen. What actions should I take next to complete the task? YOU MUST USE FUNCTION CALLS to perform actions.' },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshot}` } }
+        ]
+      }
+    ];
+    
+    console.log(`Sending request with ${messageHistory.length} messages`);
+    
+    // Make API request with function call tools enabled
+    const response = await openai.chat.completions.create({
+      model: COMPUTER_USE_MODEL,
+      messages: messageHistory,
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'click',
+            description: 'Click on an element on the page',
+            parameters: {
+              type: 'object',
+              properties: {
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector for the element to click, e.g., "a.more-info", "#submit-button", etc.'
+                },
+                position: {
+                  type: 'object',
+                  description: 'Coordinates to click on',
+                  properties: {
+                    x: { type: 'number', description: 'X coordinate' },
+                    y: { type: 'number', description: 'Y coordinate' }
+                  }
+                },
+                options: {
+                  type: 'object',
+                  description: 'Click options',
+                  properties: {
+                    button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button to click with' },
+                    clickCount: { type: 'number', description: 'Number of clicks' },
+                    delay: { type: 'number', description: 'Delay between clicks in milliseconds' }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'type',
+            description: 'Type text into an input field',
+            parameters: {
+              type: 'object',
+              properties: {
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector for the input element, e.g., "input[name=\'search\']", "#email", etc.'
+                },
+                text: {
+                  type: 'string',
+                  description: 'Text to type'
+                },
+                options: {
+                  type: 'object',
+                  description: 'Type options',
+                  properties: {
+                    delay: { type: 'number', description: 'Delay between keystrokes in milliseconds' },
+                    clear: { type: 'boolean', description: 'Whether to clear the input first' }
+                  }
+                }
+              },
+              required: ['selector', 'text']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'navigate',
+            description: 'Navigate to a URL',
+            parameters: {
+              type: 'object',
+              properties: {
+                url: {
+                  type: 'string',
+                  description: 'URL to navigate to, e.g., "https://example.com", "/about", etc.'
+                },
+                options: {
+                  type: 'object',
+                  description: 'Navigation options',
+                  properties: {
+                    timeout: { type: 'number', description: 'Navigation timeout in milliseconds' },
+                    waitUntil: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'When to consider navigation as finished' }
+                  }
+                }
+              },
+              required: ['url']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'scroll',
+            description: 'Scroll the page',
+            parameters: {
+              type: 'object',
+              properties: {
+                direction: {
+                  type: 'string',
+                  enum: ['up', 'down', 'left', 'right'],
+                  description: 'Direction to scroll'
+                },
+                amount: {
+                  type: 'number',
+                  description: 'Amount to scroll in pixels'
+                },
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector for the element to scroll into view, e.g., "#footer", ".section-3", etc.'
+                }
+              },
+              required: ['direction']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'wait',
+            description: 'Wait for a selector or timeout',
+            parameters: {
+              type: 'object',
+              properties: {
+                selector: {
+                  type: 'string',
+                  description: 'CSS selector to wait for, e.g., "#loaded-content", ".results-container", etc.'
+                },
+                timeout: {
+                  type: 'number',
+                  description: 'Time to wait in milliseconds'
+                }
+              }
+            }
+          }
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: 4096,
+      tool_choice: "auto"
+    });
+    
+    // Process the response to extract actions and thinking
+    const result = processComputerUseResponse(response);
+    return result;
+  } catch (error) {
+    console.error('Error getting Computer Use actions:', error);
+    throw error;
+  }
+}
+
+/**
+ * Process Computer Use API response
+ * @param {Object} response - OpenAI API response
+ * @returns {Object} - Processed response with actions and thinking
+ */
+function processComputerUseResponse(response) {
+  // Extract the main message content
+  const message = response.choices[0].message;
+  
+  // Check if the task is deemed complete
+  const isComplete = message.content && 
+                    message.content.toLowerCase().includes('task complete');
+  
+  // Extract tool calls (actions)
+  const actions = [];
+  if (message.tool_calls && message.tool_calls.length > 0) {
+    for (const toolCall of message.tool_calls) {
+      if (toolCall.function) {
+        try {
+          const action = {
+            type: toolCall.function.name,
+            ...JSON.parse(toolCall.function.arguments)
+          };
+          actions.push(action);
+        } catch (error) {
+          console.error('Error parsing tool call arguments:', error);
+        }
+      }
+    }
+  }
+  
+  return {
+    complete: isComplete,
+    actions,
+    thinking: message.content,
+    result: isComplete ? message.content : null
+  };
+}
+
 module.exports = { 
   generateChatResponse, 
   simpleChatResponse,
   setScriptGenerator, // Export function to set script generator externally
-  getOpenAIClient: () => openai // Export function to get OpenAI client
+  getOpenAIClient: () => openai, // Export function to get OpenAI client
+  getComputerUseActions, // Export the Computer Use function
+  processComputerUseResponse // Export the response processor
 }; 

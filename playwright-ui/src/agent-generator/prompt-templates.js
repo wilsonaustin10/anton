@@ -59,12 +59,11 @@ Remember to provide your response in the specified format with the ACTION SEQUEN
 Here's an example of the expected output format:
 
 ===ACTION SEQUENCE===
-1. Start a Chrome browser in non-headless mode
-2. Navigate to example.com
-3. Perform actions specific to the task
-4. Extract any necessary data
-5. Handle errors gracefully
-6. Close the browser when done
+1. Navigate to example.com
+2. Perform actions specific to the task
+3. Extract any necessary data
+4. Handle errors gracefully
+
 
 ===PLAYWRIGHT SCRIPT===
 // The complete, ready-to-run Playwright script goes here
