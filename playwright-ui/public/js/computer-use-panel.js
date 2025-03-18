@@ -40,6 +40,18 @@ function createComputerUsePanel() {
         <h4>Actions</h4>
         <div id="computer-use-actions" class="actions-list"></div>
       </div>
+      <div id="validation-container" class="validation-container" style="display: none;">
+        <h4>Task Validation</h4>
+        <div class="validation-question">Did the agent successfully complete the task?</div>
+        <div class="validation-buttons">
+          <button id="validate-success" class="validation-button success">Yes, Save This Sequence</button>
+          <button id="validate-failure" class="validation-button failure">No, Task Failed</button>
+        </div>
+      </div>
+      <div id="similar-tasks-container" class="similar-tasks-container" style="display: none;">
+        <h4>Similar Tasks</h4>
+        <div id="similar-tasks-list" class="similar-tasks-list"></div>
+      </div>
     </div>
   `;
   
@@ -170,6 +182,78 @@ function createComputerUsePanel() {
     .minimized .panel-content {
       display: none;
     }
+    
+    /* Validation styles */
+    .validation-container {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border: 1px solid #eee;
+    }
+    
+    .validation-question {
+      font-size: 14px;
+      margin-bottom: 12px;
+      font-weight: bold;
+    }
+    
+    .validation-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .validation-button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      flex: 1;
+    }
+    
+    .validation-button.success {
+      background: #2ecc71;
+      color: white;
+    }
+    
+    .validation-button.failure {
+      background: #e74c3c;
+      color: white;
+    }
+    
+    /* Similar tasks styles */
+    .similar-tasks-container {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f0f8ff;
+      border-radius: 8px;
+      border: 1px solid #d0e8ff;
+    }
+    
+    .similar-task-item {
+      padding: 8px;
+      margin-bottom: 8px;
+      background: white;
+      border-radius: 4px;
+      border-left: 3px solid #4a69bd;
+      cursor: pointer;
+    }
+    
+    .similar-task-item:hover {
+      background: #f5f9ff;
+    }
+    
+    .similar-task-description {
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    
+    .similar-task-actions {
+      font-size: 11px;
+      color: #666;
+    }
   `;
   
   document.head.appendChild(style);
@@ -198,7 +282,8 @@ function setupEventListeners() {
     const taskDescription = taskInput.value.trim();
     
     if (taskDescription) {
-      executeComputerUseTask(taskDescription);
+      // Check for similar tasks first
+      checkForSimilarTasks(taskDescription);
     } else {
       updateStatus('Please enter a task description', 'error');
     }
@@ -209,13 +294,33 @@ function setupEventListeners() {
     if (e.key === 'Enter') {
       const taskDescription = e.target.value.trim();
       if (taskDescription) {
-        executeComputerUseTask(taskDescription);
+        // Check for similar tasks first
+        checkForSimilarTasks(taskDescription);
       } else {
         updateStatus('Please enter a task description', 'error');
       }
     }
   });
+  
+  // Task validation buttons
+  document.getElementById('validate-success').addEventListener('click', () => {
+    validateTask(true);
+  });
+  
+  document.getElementById('validate-failure').addEventListener('click', () => {
+    validateTask(false);
+  });
 }
+
+// Current task state
+let currentTask = {
+  description: '',
+  actions: [],
+  results: [],
+  status: 'idle',
+  sessionId: null,
+  taskId: null
+};
 
 // Update status display
 function updateStatus(message, type = 'info') {
@@ -285,11 +390,203 @@ function addAction(action, success, result) {
   actionsEl.appendChild(actionEl);
 }
 
-// Execute a Computer Use task
-async function executeComputerUseTask(taskDescription) {
-  updateStatus('Executing Computer Use task...', 'info');
+// Show validation UI
+function showValidationUI() {
+  const validationContainer = document.getElementById('validation-container');
+  validationContainer.style.display = 'block';
+}
+
+// Hide validation UI
+function hideValidationUI() {
+  const validationContainer = document.getElementById('validation-container');
+  validationContainer.style.display = 'none';
+}
+
+// Check for similar tasks before executing
+async function checkForSimilarTasks(taskDescription) {
+  try {
+    const response = await fetch('/api/computer-use/similar-tasks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ taskDescription })
+    });
+    
+    if (!response.ok) {
+      // Proceed with execution if API fails
+      executeComputerUseTask(taskDescription);
+      return;
+    }
+    
+    const result = await response.json();
+    
+    if (result.tasks && result.tasks.length > 0) {
+      // Show similar tasks
+      displaySimilarTasks(result.tasks, taskDescription);
+    } else {
+      // No similar tasks, proceed with execution
+      executeComputerUseTask(taskDescription);
+    }
+  } catch (error) {
+    console.error('Error checking for similar tasks:', error);
+    // Proceed with execution if API fails
+    executeComputerUseTask(taskDescription);
+  }
+}
+
+// Display similar tasks
+function displaySimilarTasks(tasks, originalDescription) {
+  const container = document.getElementById('similar-tasks-container');
+  const listEl = document.getElementById('similar-tasks-list');
+  
+  // Clear previous tasks
+  listEl.innerHTML = '';
+  
+  // Add tasks
+  tasks.forEach(task => {
+    const taskItem = document.createElement('div');
+    taskItem.className = 'similar-task-item';
+    taskItem.innerHTML = `
+      <div class="similar-task-description">${task.description}</div>
+      <div class="similar-task-actions">
+        ${task.actions.length} action${task.actions.length !== 1 ? 's' : ''}
+        • Used ${task.taskFrequency} time${task.taskFrequency !== 1 ? 's' : ''}
+      </div>
+    `;
+    
+    // Add click event to use this task
+    taskItem.addEventListener('click', () => {
+      container.style.display = 'none';
+      executeValidatedTask(task.id);
+    });
+    
+    listEl.appendChild(taskItem);
+  });
+  
+  // Add option to proceed with original task
+  const createNewItem = document.createElement('div');
+  createNewItem.className = 'similar-task-item';
+  createNewItem.style.borderLeftColor = '#e67e22';
+  createNewItem.innerHTML = `
+    <div class="similar-task-description">Create new task</div>
+    <div class="similar-task-actions">Proceed with original description</div>
+  `;
+  
+  createNewItem.addEventListener('click', () => {
+    container.style.display = 'none';
+    executeComputerUseTask(originalDescription);
+  });
+  
+  listEl.appendChild(createNewItem);
+  
+  // Show the container
+  container.style.display = 'block';
+}
+
+// Execute a validated task by ID
+async function executeValidatedTask(taskId) {
+  updateStatus('Executing validated task...', 'info');
   updateThinking('');
   clearActions();
+  
+  try {
+    const response = await fetch('/api/computer-use/execute-validated', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ taskId })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      updateStatus('Validated task executed successfully', 'success');
+    } else {
+      updateStatus(result.error || 'Failed to execute validated task', 'error');
+    }
+    
+    // Display actions
+    if (result.actions && result.actions.length > 0) {
+      for (let i = 0; i < result.actions.length; i++) {
+        const action = result.actions[i];
+        const actionResult = result.results && result.results[i];
+        const success = actionResult ? actionResult.success : false;
+        
+        addAction(action, success, actionResult);
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error executing validated task:', error);
+    updateStatus(`Error: ${error.message}`, 'error');
+  }
+}
+
+// Validate a task
+async function validateTask(isSuccess) {
+  if (!currentTask.taskId) {
+    updateStatus('No task to validate', 'error');
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/computer-use/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        taskId: currentTask.taskId,
+        success: isSuccess,
+        description: currentTask.description,
+        actions: currentTask.actions,
+        sessionId: currentTask.sessionId
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      updateStatus(isSuccess ? 'Task validated and saved!' : 'Task marked as failed', isSuccess ? 'success' : 'error');
+    } else {
+      updateStatus(result.error || 'Failed to validate task', 'error');
+    }
+    
+    // Hide validation UI
+    hideValidationUI();
+    
+  } catch (error) {
+    console.error('Error validating task:', error);
+    updateStatus(`Validation error: ${error.message}`, 'error');
+  }
+}
+
+// Execute a Computer Use task
+async function executeComputerUseTask(taskDescription) {
+  // Clear previous task state
+  clearActions();
+  clearThinking();
+  updateStatus('Executing task...', 'info');
+  
+  // Reset current task
+  currentTask = {
+    description: taskDescription,
+    actions: [],
+    results: [],
+    status: 'in_progress',
+    sessionId: null,
+    taskId: null
+  };
   
   try {
     const response = await fetch('/api/computer-use/execute', {
@@ -308,37 +605,75 @@ async function executeComputerUseTask(taskDescription) {
     }
     
     const result = await response.json();
+    console.log("Task execution result:", result);
     
-    if (result.success) {
-      updateStatus('Task executed successfully', 'success');
-    } else {
-      updateStatus(result.error || 'Failed to execute task', 'error');
-    }
+    // Update current task
+    currentTask.sessionId = result.sessionId;
+    currentTask.taskId = result.taskId;
+    currentTask.actions = result.actions || [];
+    currentTask.results = result.actionResults || result.results || [];
     
-    // Display thinking
+    // CRITICAL CHANGE: Always display thinking FIRST before any success/failure messages
     if (result.thinking) {
-      updateThinking(result.thinking);
+      console.log("Displaying AI thinking:", result.thinking.substring(0, 100) + "...");
+      currentTask.thinking = result.thinking;
+      displayThinking(result.thinking);
     }
     
-    // Display actions
+    // Then display actions AFTER thinking
+    let allActionsSuccessful = true;
     if (result.actions && result.actions.length > 0) {
+      console.log(`Displaying ${result.actions.length} actions`);
       for (let i = 0; i < result.actions.length; i++) {
         const action = result.actions[i];
-        const actionResult = result.results && result.results[i];
+        // Get result from either actionResults (new format) or results (old format)
+        const actionResult = (result.actionResults && result.actionResults[i]) || 
+                             (result.results && result.results[i]);
         const success = actionResult ? actionResult.success : false;
+        
+        if (!success) {
+          allActionsSuccessful = false;
+        }
         
         addAction(action, success, actionResult);
       }
     }
     
-    // Task completion
-    if (result.complete) {
-      updateStatus('Task complete!', 'success');
+    // Store important metadata for validation
+    if (result.url) currentTask.url = result.url;
+    if (result.title) currentTask.title = result.title;
+    
+    // ONLY AFTER displaying thinking and actions, determine task success
+    // 1. Was the OpenAI response marked as complete?
+    // 2. Did all actions execute successfully?
+    // 3. Did we successfully navigate to a URL that matches the task?
+    const taskSuccess = result.success || 
+                       (allActionsSuccessful && result.complete) || 
+                       (result.thinking && result.thinking.toLowerCase().includes('task complete'));
+    
+    currentTask.status = taskSuccess ? 'completed' : 'failed';
+    
+    // Update the UI status message AFTER showing thinking and actions
+    if (taskSuccess) {
+      updateStatus('Task executed successfully', 'success');
+    } else {
+      // Show a more helpful message if we executed actions but didn't get a success signal
+      if (result.actions && result.actions.length > 0 && allActionsSuccessful) {
+        updateStatus('Task likely successful, but needs validation', 'warning');
+      } else {
+        // Only show error AFTER showing thinking and actions
+        updateStatus(result.error || 'Task may not be complete. Please verify and provide feedback.', 'warning');
+      }
     }
+    
+    // Always show validation UI regardless of reported success
+    // Let the user determine if the task was actually successful
+    showValidationUI();
     
   } catch (error) {
     console.error('Error executing Computer Use task:', error);
     updateStatus(`Error: ${error.message}`, 'error');
+    currentTask.status = 'error';
   }
 }
 

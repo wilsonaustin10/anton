@@ -311,250 +311,258 @@ async function generateChatResponse(userMessage, history = []) {
 }
 
 /**
- * Request Computer Use actions from OpenAI
- * @param {string} taskDescription - Description of the task
- * @param {string} screenshot - Base64-encoded screenshot
- * @param {Array} messages - Conversation history
- * @returns {Object} - OpenAI response with actions
+ * Process the response from OpenAI's Computer Use API
+ * @param {Object} response - The raw response from OpenAI
+ * @returns {Object} - Processed response with actions, thinking, and completion status
  */
-async function getComputerUseActions(taskDescription, screenshot, messages = []) {
-  if (!openai) {
-    throw new Error('OpenAI client not initialized');
+function processComputerUseResponse(response) {
+  // Extract the main message content
+  const mainMessage = response.choices[0].message;
+  const content = mainMessage.content.trim();
+  
+  console.log('Processing OpenAI response for Computer Use. Length:', content.length);
+  console.log('First 100 chars:', content.substring(0, 100));
+  
+  // Try to parse as JSON
+  let jsonResponse;
+  try {
+    jsonResponse = JSON.parse(content);
+    console.log('Successfully parsed JSON response');
+  } catch (e) {
+    console.error('Error parsing JSON response:', e);
+    
+    // Attempt to extract JSON from the response using regex
+    const jsonMatch = content.match(/```json([\s\S]*?)```/) || content.match(/{[\s\S]*}/);
+    if (jsonMatch) {
+      try {
+        const extractedJson = jsonMatch[1] ? jsonMatch[1].trim() : jsonMatch[0].trim();
+        jsonResponse = JSON.parse(extractedJson);
+        console.log('Successfully extracted and parsed JSON from response');
+      } catch (extractError) {
+        console.error('Error parsing extracted JSON:', extractError);
+        throw new Error('Failed to parse response as JSON');
+      }
+    } else {
+      throw new Error('Failed to parse response as JSON');
+    }
   }
   
-  console.log('Requesting Computer Use actions from OpenAI');
+  // Enhanced: More robust task completion detection
+  const completionPhrases = [
+    'task complete', 
+    'task is complete',
+    'successfully completed',
+    'task accomplished',
+    'achieved the goal',
+    'completed successfully',
+    'task finished',
+    'goal has been achieved',
+    'found the requested information',
+    'data has been found',
+    'we have reached',
+    'we are now at',
+    'successfully navigated',
+    'information is displayed'
+  ];
+  
+  // Check for completion phrases in thinking, content, or anywhere else in the response
+  const contentLower = content.toLowerCase();
+  const thinkingLower = jsonResponse.thinking ? jsonResponse.thinking.toLowerCase() : '';
+  
+  // Look for specific completion indicators in the content or thinking
+  const hasCompletionPhrase = completionPhrases.some(phrase => 
+    contentLower.includes(phrase) || thinkingLower.includes(phrase));
+  
+  // Look for completion phrases in the URL or page state descriptions
+  const urlContainsTargetKeywords = jsonResponse.thinking && 
+    (thinkingLower.includes('current url shows') || 
+     thinkingLower.includes('we are at the correct page') ||
+     thinkingLower.includes('page shows the requested') ||
+     thinkingLower.includes('information is visible'));
+    
+  // Check if task is complete based on multiple signals
+  const isComplete = 
+    hasCompletionPhrase || 
+    urlContainsTargetKeywords ||
+    (jsonResponse.complete === true) || 
+    (jsonResponse.complete === 'true') || 
+    (jsonResponse.status === 'complete') ||
+    (jsonResponse.status === 'completed');
+  
+  // Log detailed completion status reasoning
+  console.log(`Task completion detection:
+    - Has completion phrase: ${hasCompletionPhrase}
+    - URL contains target keywords: ${urlContainsTargetKeywords}
+    - JSON complete field: ${jsonResponse.complete}
+    - JSON status field: ${jsonResponse.status}
+    - Final determination: ${isComplete}`);
+  
+  // Ensure actions array exists
+  if (!jsonResponse.actions || !Array.isArray(jsonResponse.actions)) {
+    console.warn('No actions found in response, creating empty actions array');
+    jsonResponse.actions = [];
+  }
+  
+  return {
+    complete: isComplete,
+    actions: jsonResponse.actions,
+    thinking: jsonResponse.thinking || null,
+    result: isComplete ? content : null
+  };
+}
+
+/**
+ * Get Computer Use actions from OpenAI to automate browser tasks
+ * @param {Page} page - Playwright page object
+ * @param {string} taskDescription - Description of the task to perform
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} - The actions to execute
+ */
+async function getComputerUseActions(page, taskDescription, options = {}) {
+  console.log(`Getting Computer Use actions for task: "${taskDescription}"`);
   
   try {
-    // Create system message with task description
-    const systemMessage = {
-      role: 'system',
-      content: `You are an AI assistant that helps users automate browser tasks. Your goal is to help the user complete the following task: ${taskDescription}.
-
-IMPORTANT: You MUST use the available function calls to perform actions. DO NOT just describe what to do - actually perform the actions by calling the appropriate functions.
-
-When analyzing the screenshot:
-1. Look for relevant elements like buttons, links, text fields
-2. Determine the best selector or coordinates to interact with elements
-3. Use the most appropriate function (click, type, etc.) to perform the needed action
-4. If you need to chain multiple actions, call them in the correct sequence
-
-When you believe the task is complete, include "TASK COMPLETE" in your response.
-
-Available actions:
-- click: Click on elements using selectors or coordinates
-- type: Type text into forms
-- navigate: Go to specific URLs
-- scroll: Scroll the page or specific elements
-- wait: Wait for elements or timeouts
-
-YOU MUST USE FUNCTION CALLS to perform actions. DO NOT just describe what to do - actually execute the actions using the provided functions.`
-    };
+    // Safety check
+    if (!openai) {
+      console.error('OpenAI client not initialized. Check your API key configuration.');
+      throw new Error('OpenAI client not initialized');
+    }
     
-    // Prepare messages history
-    const messageHistory = [
-      systemMessage,
-      ...messages.filter(msg => msg.role !== 'system'), // Remove any existing system messages
+    // Capture screenshot of current page
+    const screenshot = await page.screenshot({
+      type: 'jpeg',
+      quality: 80,
+      fullPage: false
+    });
+    
+    // Convert screenshot to base64
+    const base64Screenshot = screenshot.toString('base64');
+    console.log(`Screenshot captured, size: ${Math.round(base64Screenshot.length / 1024)}KB`);
+    
+    // Construct current URL and page title
+    let pageInfo = {};
+    try {
+      const url = await page.url();
+      const title = await page.title();
+      pageInfo = { url, title };
+    } catch (e) {
+      console.error('Error getting page info:', e);
+      pageInfo = { url: 'unknown', title: 'unknown' };
+    }
+    
+    // Get system information
+    const systemInfo = await getSystemInfo();
+    
+    // Create the prompt
+    const messages = [
+      {
+        role: 'system',
+        content: [
+          `You are a computer control system that generates precise browser automation actions based on a user's task description and screenshot.`,
+          `Your goal is to perform the user's requested task step by step. Focus only on generating actions that can be executed programmatically.`,
+          `You will receive a task description and a screenshot of a webpage. Determine the best sequence of actions to accomplish the task.`,
+          
+          `Return your answer as a valid JSON object with the following properties:`,
+          `- actions: An array of action objects, each with a "type" property and other parameters specific to that action type`,
+          `- complete: Set to true if you believe the task has been successfully completed based on the current state`,
+          `- status: Include a string status such as "in_progress", "completed", or "error"`,
+          options.extract_thinking ? `- thinking: Your step-by-step analysis of the task and how you plan to accomplish it` : '',
+          
+          `When a task is successfully completed, you MUST:`,
+          `1. Set "complete" to true`,
+          `2. Set "status" to "completed"`,
+          `3. Include "Task complete" or "Task completed successfully" in your explanation`,
+          
+          `IMPORTANT DETECTION RULES:`,
+          `- If the user asked to navigate to a specific URL and the page is already at that URL, mark the task as COMPLETE`,
+          `- If the user asked to find specific data (e.g., "find GBP/USD historical data") and that data is visible in the screenshot, mark the task as COMPLETE`,
+          `- If the user asked to search for something and the search results are visible, mark the task as COMPLETE`,
+          `- When in doubt about task completion, look at the current URL and page title to determine if they match what the user was looking for`,
+          
+          `Supported action types:`,
+          `- navigate: { type: "navigate", url: "https://example.com" }`,
+          `- click: { type: "click", selector: "#button-id" } or { type: "click", position: { x: 100, y: 200 } }`,
+          `- type: { type: "type", selector: "#input-id", text: "text to type" }`,
+          `- wait: { type: "wait", timeout: 1000 } or { type: "wait", selector: "#element-to-wait-for" }`,
+          `- scroll: { type: "scroll", direction: "down", amount: 300 } or { type: "scroll", selector: "#element-to-scroll-to" }`,
+          
+          `You MUST validate all selectors and URLs before including them in actions.`,
+          `Start with what you can see in the screenshot. If more steps are needed, you can include navigation or scrolling actions.`,
+          `For selectors, prefer IDs, then distinctive class names, then data attributes, then other attributes.`,
+          `Limit your response to 1-3 actions per request. Additional actions can be requested in subsequent calls.`,
+          
+          `If the task appears to be completed in the current screenshot (e.g., you can see the requested data is visible),`,
+          `you MUST set "complete" to true and "status" to "completed", and include "Task complete" in your thinking.`
+        ].join('\n')
+      },
       {
         role: 'user',
         content: [
-          { type: 'text', text: 'Here is the current state of the screen. What actions should I take next to complete the task? YOU MUST USE FUNCTION CALLS to perform actions.' },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshot}` } }
+          `Task: ${taskDescription}`,
+          `Current page: ${pageInfo.url}`,
+          `Page title: ${pageInfo.title}`,
+          `System info: ${JSON.stringify(systemInfo)}`
+        ].join('\n')
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:image/jpeg;base64,${base64Screenshot}`
+            }
+          }
         ]
       }
     ];
     
-    console.log(`Sending request with ${messageHistory.length} messages`);
+    console.log('Sending Computer Use request to OpenAI...');
     
-    // Make API request with function call tools enabled
     const response = await openai.chat.completions.create({
       model: COMPUTER_USE_MODEL,
-      messages: messageHistory,
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'click',
-            description: 'Click on an element on the page',
-            parameters: {
-              type: 'object',
-              properties: {
-                selector: {
-                  type: 'string',
-                  description: 'CSS selector for the element to click, e.g., "a.more-info", "#submit-button", etc.'
-                },
-                position: {
-                  type: 'object',
-                  description: 'Coordinates to click on',
-                  properties: {
-                    x: { type: 'number', description: 'X coordinate' },
-                    y: { type: 'number', description: 'Y coordinate' }
-                  }
-                },
-                options: {
-                  type: 'object',
-                  description: 'Click options',
-                  properties: {
-                    button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button to click with' },
-                    clickCount: { type: 'number', description: 'Number of clicks' },
-                    delay: { type: 'number', description: 'Delay between clicks in milliseconds' }
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          type: 'function',
-          function: {
-            name: 'type',
-            description: 'Type text into an input field',
-            parameters: {
-              type: 'object',
-              properties: {
-                selector: {
-                  type: 'string',
-                  description: 'CSS selector for the input element, e.g., "input[name=\'search\']", "#email", etc.'
-                },
-                text: {
-                  type: 'string',
-                  description: 'Text to type'
-                },
-                options: {
-                  type: 'object',
-                  description: 'Type options',
-                  properties: {
-                    delay: { type: 'number', description: 'Delay between keystrokes in milliseconds' },
-                    clear: { type: 'boolean', description: 'Whether to clear the input first' }
-                  }
-                }
-              },
-              required: ['selector', 'text']
-            }
-          }
-        },
-        {
-          type: 'function',
-          function: {
-            name: 'navigate',
-            description: 'Navigate to a URL',
-            parameters: {
-              type: 'object',
-              properties: {
-                url: {
-                  type: 'string',
-                  description: 'URL to navigate to, e.g., "https://example.com", "/about", etc.'
-                },
-                options: {
-                  type: 'object',
-                  description: 'Navigation options',
-                  properties: {
-                    timeout: { type: 'number', description: 'Navigation timeout in milliseconds' },
-                    waitUntil: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'When to consider navigation as finished' }
-                  }
-                }
-              },
-              required: ['url']
-            }
-          }
-        },
-        {
-          type: 'function',
-          function: {
-            name: 'scroll',
-            description: 'Scroll the page',
-            parameters: {
-              type: 'object',
-              properties: {
-                direction: {
-                  type: 'string',
-                  enum: ['up', 'down', 'left', 'right'],
-                  description: 'Direction to scroll'
-                },
-                amount: {
-                  type: 'number',
-                  description: 'Amount to scroll in pixels'
-                },
-                selector: {
-                  type: 'string',
-                  description: 'CSS selector for the element to scroll into view, e.g., "#footer", ".section-3", etc.'
-                }
-              },
-              required: ['direction']
-            }
-          }
-        },
-        {
-          type: 'function',
-          function: {
-            name: 'wait',
-            description: 'Wait for a selector or timeout',
-            parameters: {
-              type: 'object',
-              properties: {
-                selector: {
-                  type: 'string',
-                  description: 'CSS selector to wait for, e.g., "#loaded-content", ".results-container", etc.'
-                },
-                timeout: {
-                  type: 'number',
-                  description: 'Time to wait in milliseconds'
-                }
-              }
-            }
-          }
-        }
-      ],
+      messages,
       temperature: 0.2,
-      max_tokens: 4096,
-      tool_choice: "auto"
+      response_format: { type: 'json_object' },
+      max_tokens: 1500
     });
     
-    // Process the response to extract actions and thinking
+    // Process the response using our dedicated function
     const result = processComputerUseResponse(response);
+    
+    // Log actions for debugging
+    console.log(`Received ${result.actions.length} actions:`, JSON.stringify(result.actions, null, 2));
+    
+    if (options.extract_thinking && result.thinking) {
+      console.log('Extracted thinking:', result.thinking);
+    }
+    
     return result;
   } catch (error) {
     console.error('Error getting Computer Use actions:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     throw error;
   }
 }
 
 /**
- * Process Computer Use API response
- * @param {Object} response - OpenAI API response
- * @returns {Object} - Processed response with actions and thinking
+ * Get current system information
+ * @returns {Promise<Object>} - System information
  */
-function processComputerUseResponse(response) {
-  // Extract the main message content
-  const message = response.choices[0].message;
-  
-  // Check if the task is deemed complete
-  const isComplete = message.content && 
-                    message.content.toLowerCase().includes('task complete');
-  
-  // Extract tool calls (actions)
-  const actions = [];
-  if (message.tool_calls && message.tool_calls.length > 0) {
-    for (const toolCall of message.tool_calls) {
-      if (toolCall.function) {
-        try {
-          const action = {
-            type: toolCall.function.name,
-            ...JSON.parse(toolCall.function.arguments)
-          };
-          actions.push(action);
-        } catch (error) {
-          console.error('Error parsing tool call arguments:', error);
-        }
-      }
-    }
-  }
-  
-  return {
-    complete: isComplete,
-    actions,
-    thinking: message.content,
-    result: isComplete ? message.content : null
+async function getSystemInfo() {
+  const os = require('os');
+  const systemInfo = {
+    platform: os.platform(),
+    release: os.release(),
+    hostname: os.hostname(),
+    architecture: os.arch(),
+    cpus: os.cpus().length,
+    memory: Math.round(os.totalmem() / (1024 * 1024 * 1024)),
+    nodeVersion: process.version,
+    timestamp: new Date().toISOString()
   };
+  
+  return systemInfo;
 }
 
 module.exports = { 

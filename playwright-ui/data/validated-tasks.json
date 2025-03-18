@@ -1,0 +1,21 @@
+[
+  {
+    "id": "test-task-123",
+    "description": "Navigate to investing.com and find GBP/USD historical data",
+    "actions": [
+      {
+        "type": "navigate",
+        "url": "https://www.investing.com"
+      },
+      {
+        "type": "navigate",
+        "url": "https://www.investing.com/currencies/gbp-usd-historical-data"
+      }
+    ],
+    "url": "https://www.investing.com/currencies/gbp-usd-historical-data",
+    "title": "GBP/USD Historical Data - Investing.com",
+    "timestamp": "2025-03-17T21:10:37.626Z",
+    "validated": true,
+    "taskFrequency": 1
+  }
+]

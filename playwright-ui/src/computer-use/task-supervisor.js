@@ -42,6 +42,7 @@ class TaskSupervisor extends EventEmitter {
       page,
       options,
       actions: [],
+      actionResults: [],
       screenshots: [],
       messages: []
     };
@@ -94,14 +95,29 @@ class TaskSupervisor extends EventEmitter {
         // 2. Send to OpenAI with current context
         console.log(`[${taskId}] Sending screenshot to OpenAI for analysis`);
         const aiResponse = await this.openaiClient.getComputerUseActions(
+          task.page,
           task.description,
-          screenshot.base64,
-          task.messages
+          { 
+            extract_thinking: task.options.extract_thinking || true,
+            messages: task.messages 
+          }
         );
         
         // 3. If task complete, finish
         if (aiResponse.complete) {
           console.log(`[${taskId}] Task marked as complete by AI`);
+          
+          // Save thinking to messages for final task context
+          if (aiResponse.thinking) {
+            console.log(`[${taskId}] Saving final AI thinking`);
+            task.messages.push({
+              role: 'assistant',
+              content: aiResponse.thinking,
+              timestamp: Date.now()
+            });
+            this.emit('aiThinking', { taskId, thinking: aiResponse.thinking });
+          }
+          
           this.setTaskStatus(taskId, 'completed', { 
             result: aiResponse.result 
           });
@@ -113,9 +129,33 @@ class TaskSupervisor extends EventEmitter {
           console.log(`[${taskId}] Executing ${aiResponse.actions.length} actions`);
           for (const action of aiResponse.actions) {
             try {
+              // Add more detailed logging for each action
+              console.log(`[${taskId}] Executing action: ${action.type} ${JSON.stringify(action)}`);
+              
+              // For click actions, use a longer timeout and retry mechanism
+              if (action.type === 'click' && action.selector) {
+                console.log(`[${taskId}] Click action with selector: ${action.selector}`);
+                try {
+                  // First try to ensure element is visible with longer timeout
+                  await task.page.waitForSelector(action.selector, { 
+                    state: 'visible',
+                    timeout: 10000 // Increase timeout to 10 seconds
+                  });
+                  console.log(`[${taskId}] Selector ${action.selector} is now visible`);
+                } catch (selectorError) {
+                  console.log(`[${taskId}] Selector ${action.selector} not visible after timeout, will still try to click`);
+                  // Continue trying to execute the action anyway
+                }
+              }
+              
               const result = await this.actionExecutor.executeAction(task.page, action);
-              task.actions.push(result);
+              task.actions.push(action);
+              task.actionResults.push({
+                success: true,
+                result
+              });
               this.emit('actionExecuted', { taskId, action: result });
+              console.log(`[${taskId}] Action executed successfully`);
             } catch (actionError) {
               console.error(`[${taskId}] Error executing action:`, actionError);
               this.emit('actionError', { taskId, action, error: actionError });
@@ -126,6 +166,18 @@ class TaskSupervisor extends EventEmitter {
                 content: `Error executing action: ${actionError.message}`,
                 timestamp: Date.now()
               });
+              
+              // Track the failed action
+              task.actions.push(action);
+              task.actionResults.push({
+                success: false,
+                error: actionError.message
+              });
+              
+              // Don't fail the entire task on a single action failure unless it's a critical error
+              // Just continue to the next iteration to get new instructions
+              console.log(`[${taskId}] Will continue task despite action failure`);
+              // Don't break the execution loop here
             }
           }
         } else {
@@ -252,6 +304,64 @@ class TaskSupervisor extends EventEmitter {
    */
   getAllTasks() {
     return Array.from(this.activeTasks.values());
+  }
+  
+  /**
+   * Wait for a task to complete
+   * @param {string} taskId - Task ID
+   * @param {Object} options - Options
+   * @returns {Promise<Object>} - Task result
+   */
+  waitForTaskCompletion(taskId, options = {}) {
+    const task = this.activeTasks.get(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    
+    const timeout = options.timeout || 60000; // Default 60 seconds
+    const pollInterval = options.pollInterval || 500; // Default 500ms
+    
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      
+      // If already complete, resolve immediately
+      if (['completed', 'failed', 'aborted', 'timeout'].includes(task.status)) {
+        return resolve(task);
+      }
+      
+      // Set up completion event listener
+      const completionListener = ({ taskId: id, status }) => {
+        if (id === taskId && ['completed', 'failed', 'aborted', 'timeout'].includes(status)) {
+          this.removeListener('taskStatusChanged', completionListener);
+          clearInterval(pollInterval);
+          resolve(this.activeTasks.get(taskId));
+        }
+      };
+      
+      // Listen for status changes
+      this.on('taskStatusChanged', completionListener);
+      
+      // Also poll for completion in case we miss the event
+      const interval = setInterval(() => {
+        const currentTask = this.activeTasks.get(taskId);
+        if (['completed', 'failed', 'aborted', 'timeout'].includes(currentTask.status)) {
+          this.removeListener('taskStatusChanged', completionListener);
+          clearInterval(interval);
+          resolve(currentTask);
+        }
+        
+        // Check for timeout
+        if (Date.now() - startTime > timeout) {
+          this.removeListener('taskStatusChanged', completionListener);
+          clearInterval(interval);
+          
+          // Mark as timeout if still running
+          if (currentTask.status === 'running') {
+            this.setTaskStatus(taskId, 'timeout');
+          }
+          
+          resolve(this.activeTasks.get(taskId));
+        }
+      }, pollInterval);
+    });
   }
   
   /**
