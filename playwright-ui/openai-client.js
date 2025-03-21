@@ -3,7 +3,7 @@
  */
 require('dotenv').config();
 const { OpenAI } = require('openai');
-
+const { getProcessedText } = require('./utils');
 // Remove the circular dependency by not importing script-generator directly
 // Instead, we'll maintain a reference to be set later
 let scriptGeneratorModule = null;
@@ -17,12 +17,14 @@ function setScriptGenerator(module) {
 // Initialize OpenAI client with proper configuration
 let openai;
 try {
-  openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    // Adding a longer timeout to prevent quick timeouts
-    timeout: 60000, // Increased timeout for complex tasks
-    maxRetries: 5,  // Increased retries
-  });
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      // Adding a longer timeout to prevent quick timeouts
+      timeout: 60000, // Increased timeout for complex tasks
+      maxRetries: 5,  // Increased retries
+    });
+  }
   console.log('OpenAI client initialized successfully');
 } catch (error) {
   console.error('Error initializing OpenAI client:', error);
@@ -444,7 +446,9 @@ async function getComputerUseActions(page, taskDescription, options = {}) {
     try {
       const url = await page.url();
       const title = await page.title();
-      pageInfo = { url, title };
+      const content = await page.content();
+      const shortenedDom = await getProcessedText(content, url);
+      pageInfo = { url, title, content: shortenedDom };
     } catch (e) {
       console.error('Error getting page info:', e);
       pageInfo = { url: 'unknown', title: 'unknown' };
@@ -452,48 +456,67 @@ async function getComputerUseActions(page, taskDescription, options = {}) {
     
     // Get system information
     const systemInfo = await getSystemInfo();
-    
     // Create the prompt
     const messages = [
       {
         role: 'system',
-        content: [
-          `You are a computer control system that generates precise browser automation actions based on a user's task description and screenshot.`,
-          `Your goal is to perform the user's requested task step by step. Focus only on generating actions that can be executed programmatically.`,
-          `You will receive a task description and a screenshot of a webpage. Determine the best sequence of actions to accomplish the task.`,
-          
-          `Return your answer as a valid JSON object with the following properties:`,
-          `- actions: An array of action objects, each with a "type" property and other parameters specific to that action type`,
-          `- complete: Set to true if you believe the task has been successfully completed based on the current state`,
-          `- status: Include a string status such as "in_progress", "completed", or "error"`,
-          options.extract_thinking ? `- thinking: Your step-by-step analysis of the task and how you plan to accomplish it` : '',
-          
-          `When a task is successfully completed, you MUST:`,
-          `1. Set "complete" to true`,
-          `2. Set "status" to "completed"`,
-          `3. Include "Task complete" or "Task completed successfully" in your explanation`,
-          
-          `IMPORTANT DETECTION RULES:`,
-          `- If the user asked to navigate to a specific URL and the page is already at that URL, mark the task as COMPLETE`,
-          `- If the user asked to find specific data (e.g., "find GBP/USD historical data") and that data is visible in the screenshot, mark the task as COMPLETE`,
-          `- If the user asked to search for something and the search results are visible, mark the task as COMPLETE`,
-          `- When in doubt about task completion, look at the current URL and page title to determine if they match what the user was looking for`,
-          
-          `Supported action types:`,
-          `- navigate: { type: "navigate", url: "https://example.com" }`,
-          `- click: { type: "click", selector: "#button-id" } or { type: "click", position: { x: 100, y: 200 } }`,
-          `- type: { type: "type", selector: "#input-id", text: "text to type" }`,
-          `- wait: { type: "wait", timeout: 1000 } or { type: "wait", selector: "#element-to-wait-for" }`,
-          `- scroll: { type: "scroll", direction: "down", amount: 300 } or { type: "scroll", selector: "#element-to-scroll-to" }`,
-          
-          `You MUST validate all selectors and URLs before including them in actions.`,
-          `Start with what you can see in the screenshot. If more steps are needed, you can include navigation or scrolling actions.`,
-          `For selectors, prefer IDs, then distinctive class names, then data attributes, then other attributes.`,
-          `Limit your response to 1-3 actions per request. Additional actions can be requested in subsequent calls.`,
-          
-          `If the task appears to be completed in the current screenshot (e.g., you can see the requested data is visible),`,
-          `you MUST set "complete" to true and "status" to "completed", and include "Task complete" in your thinking.`
-        ].join('\n')
+        content: (
+          `You are a computer control system that generates precise browser automation actions based on a user's task description, screenshot, and HTML DOM structure.
+
+Your goal is to perform the user's requested task by breaking it down into logical steps, tracking completion of each step, and generating the appropriate browser actions.
+
+You will receive a task description, a screenshot of a webpage, and the HTML DOM structure of the current page. First, analyze the task and break it into discrete steps. Then determine the best sequence of actions to accomplish each step by using both the visual information from the screenshot and the semantic structure from the DOM.
+
+Return your answer as a valid JSON object with the following properties:
+- steps: An array of step objects, each containing:
+  - description: A clear description of this sub-task
+  - completed: Boolean indicating if this step has been completed
+  - actions: Array of action objects needed to complete this step
+- actions: An array of action objects, each with a "type" property and other parameters specific to that action type
+- complete: Set to true if you believe the entire task has been successfully completed
+- progress: Numeric percentage (0-100) indicating overall task completion
+- status: Include a string status such as "in_progress", "completed", or "error"
+- thinking: Your step-by-step analysis of the task and how you plan to accomplish it
+
+When a task is successfully completed, you MUST:
+1. Set "complete" to true
+2. Set "status" to "completed"
+3. Mark all steps as completed
+4. Set progress to 100
+5. Include "Task complete" or "Task completed successfully" in your thinking
+
+IMPORTANT DETECTION RULES:
+- If the user asked to navigate to a specific URL and the page is already at that URL, mark that step as COMPLETED
+- If the user asked to find specific data (e.g., "find GBP/USD historical data") and that data is visible in the screenshot or DOM, mark that step as COMPLETED
+- If the user asked to search for something and the search results are visible, mark that step as COMPLETED
+- When in doubt about step completion, look at the current URL, page title, and DOM structure to determine if they match what the user was looking for
+
+Supported action types:
+- navigate: { type: "navigate", url: "https://example.com" }
+- click: { type: "click", selector: "#button-id" } or { type: "click", position: { x: 100, y: 200 } }
+- type: { type: "type", selector: "#input-id", text: "text to type" }
+- wait: { type: "wait", timeout: 1000 } or { type: "wait", selector: "#element-to-wait-for" }
+- scroll: { type: "scroll", direction: "down", amount: 300 } or { type: "scroll", selector: "#element-to-scroll-to" }
+
+DOM ANALYSIS GUIDELINES:
+- Use the DOM structure to find the most precise and reliable selectors for elements
+- When the screenshot doesn't clearly show an element, rely on the DOM to determine if it exists
+- For forms and interactive elements, use the DOM to understand their structure and attributes
+- Check for hidden elements, ARIA attributes, and other accessibility features in the DOM
+- Use data attributes, IDs, and unique class combinations from the DOM for more reliable selectors
+
+SELECTOR GENERATION:
+- Always prefer the most specific and reliable selector possible using DOM information
+- Prioritize selectors in this order: ID > unique attribute > CSS path > XPath
+- Generate CSS selectors that are robust against minor page changes
+- For dynamically generated content, look for stable attributes in the DOM hierarchy
+
+You MUST validate all selectors against the provided DOM before including them in actions.
+Start with what you can see in both the screenshot and DOM. If more steps are needed, you can include navigation or scrolling actions.
+Limit your response to 1-3 actions per request. Additional actions can be requested in subsequent calls.
+
+After each response, re-evaluate which steps have been completed based on the current screenshot and DOM, and update the steps array accordingly.`
+        )
       },
       {
         role: 'user',
@@ -501,7 +524,8 @@ async function getComputerUseActions(page, taskDescription, options = {}) {
           `Task: ${taskDescription}`,
           `Current page: ${pageInfo.url}`,
           `Page title: ${pageInfo.title}`,
-          `System info: ${JSON.stringify(systemInfo)}`
+          `System info: ${JSON.stringify(systemInfo)}`,
+          `Page content: ${pageInfo.content}`
         ].join('\n')
       },
       {
@@ -527,6 +551,8 @@ async function getComputerUseActions(page, taskDescription, options = {}) {
       max_tokens: 1500
     });
     
+
+    console.log(`"Response: ${response.choices[0].message.content}"`)
     // Process the response using our dedicated function
     const result = processComputerUseResponse(response);
     

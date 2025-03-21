@@ -430,7 +430,7 @@ if (!fs.existsSync(testDir)) {
 let activeBrowser = null;
 let activePage = null;
 let browserScreenshotInterval = null;
-const screenshotInterval = 100; // milliseconds between screenshots (reduced from 200ms)
+const screenshotInterval = 2000; // milliseconds between screenshots (reduced from 200ms)
 let isCapturing = false;
 let isHumanHandoffMode = false;
 let handoffPendingResolve = null;
