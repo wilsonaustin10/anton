@@ -1,0 +1,137 @@
+/* Command Center Styling */
+.agent-command-center {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 600px;
+}
+
+.chat-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  max-height: 300px;
+}
+
+.message {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 5px;
+}
+
+.message.user {
+  background-color: #e3f2fd;
+  align-self: flex-end;
+  margin-left: 20%;
+}
+
+.message.agent {
+  background-color: #f1f1f1;
+  align-self: flex-start;
+  margin-right: 20%;
+}
+
+.message.system {
+  background-color: #fff3cd;
+  text-align: center;
+  font-style: italic;
+  width: 100%;
+}
+
+.agent-status-panel {
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.agent-thinking {
+  font-style: italic;
+  color: #6c757d;
+  margin-bottom: 5px;
+}
+
+.action-progress {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.action-item {
+  margin-bottom: 5px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  border-left: 3px solid #6c757d;
+  background-color: #f1f1f1;
+}
+
+.action-item.success {
+  border-left-color: #28a745;
+}
+
+.action-item.error {
+  border-left-color: #dc3545;
+}
+
+.action-item.pending {
+  border-left-color: #ffc107;
+}
+
+.action-error {
+  font-size: 0.8em;
+  color: #dc3545;
+  margin-top: 5px;
+}
+
+.action-controls {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.agent-input-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.sequence-item {
+  padding: 10px;
+  margin-bottom: 10px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sequence-item:hover {
+  background-color: #e2e6ea;
+}
+
+.sequence-item .description {
+  font-weight: bold;
+}
+
+.sequence-item .meta {
+  font-size: 0.8em;
+  color: #6c757d;
+}
+
+/* Make sure the command center is responsive */
+@media (max-width: 768px) {
+  .action-controls {
+    flex-direction: column;
+  }
+  
+  .action-controls button {
+    margin-bottom: 5px;
+  }
+} 

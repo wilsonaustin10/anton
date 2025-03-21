@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutonoM3 Agent Builder</title>
+    <title>MidPrint</title>
     <!-- CodeMirror for code editor -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
@@ -236,60 +236,209 @@
             background-color: #6c757d;
             color: white;
         }
+        
+        /* Cleaner Left Panel Styles */
+        .left-panel h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eaeaea;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .left-panel .step-list {
+            max-height: 150px;
+            font-size: 0.85rem;
+        }
+        
+        .left-panel .output-container {
+            max-height: 150px;
+            font-size: 0.85rem;
+        }
+        
+        .left-panel .editor-container {
+            height: 250px;
+        }
+        
+        .left-panel .example-btn {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
+        /* Custom buttons container styling */
+        #exampleButtonsContainer {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 5px;
+        }
+        
+        /* Computer Use Mode Styling */
+        .computer-use-panel {
+            background-color: #f0f7ff;
+            border: 1px solid #cfe2ff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 15px;
+        }
+        
+        .computer-use-panel h4 {
+            font-size: 1rem;
+            color: #0a58ca;
+            margin-bottom: 10px;
+        }
+        
+        .computer-use-panel .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: #20c997;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        
+        .developer-tools-toggle {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .developer-tools-toggle:hover {
+            background-color: #e9ecef;
+        }
+        
+        /* Add padding to collapsed container */
+        #developerTools {
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 15px;
+            background-color: #f8f9fa;
+        }
+        
+        .chat-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center">AutonoM3 Agent Builder</h1>
+        <div class="row">
+            <div class="col-12">
+                <h1 class="text-center">MidPrint</h1>
+            </div>
+        </div>
         
         <div class="status-bar">
             <div id="status">Ready to create your AutonoM3 agent</div>
         </div>
         
         <div class="row">
-            <div class="col-md-3">
-                <!-- Chat Box Section -->
-                <h3>Chat Assistant</h3>
-                <div class="chat-container">
-                    <div class="chat-messages" id="chat-messages">
-                        <div class="message-container">
-                            <div class="assistant-message">Hi! I'm your AutonoM3 agent building assistant. How can I help you today?</div>
+            <div class="col-md-3 left-panel">
+                <!-- Agent Command Center Section -->
+                <h3>Agent Command Center</h3>
+                <link rel="stylesheet" href="css/command-center.css">
+                <div class="agent-command-center">
+                    <div class="chat-history" id="chat-history">
+                        <div class="message agent">
+                            <div class="message-content">Hi! I'm your AutonoM3 agent. What task would you like me to perform?</div>
                         </div>
                     </div>
-                    <div class="chat-input-container">
-                        <input type="text" id="chat-input" class="chat-input" placeholder="Type your message...">
-                        <button id="send-chat" class="btn btn-primary btn-sm">Send</button>
+                    
+                    <div class="agent-thinking-area">
+                        <div id="agent-thinking" class="thinking-indicator"></div>
+                    </div>
+                    
+                    <div class="action-progress-area">
+                        <h4>Current Actions</h4>
+                        <div id="current-action" class="current-action"></div>
+                        <div id="action-progress" class="action-progress"></div>
+                    </div>
+                    
+                    <div class="control-buttons">
+                        <button id="pause-action" class="btn btn-warning btn-sm" disabled>Pause</button>
+                        <button id="resume-action" class="btn btn-info btn-sm" disabled>Resume</button>
+                        <button id="stop-action" class="btn btn-danger btn-sm" disabled>Stop</button>
+                        <button id="save-sequence" class="btn btn-success btn-sm" disabled>Save Sequence</button>
+                    </div>
+                    
+                    <div class="agent-input-container">
+                        <input type="text" id="agent-input" class="agent-input" placeholder="Describe a task for the agent...">
+                        <button id="send-task-button" class="btn btn-primary btn-sm">Execute</button>
                     </div>
                 </div>
-
-                <h3>Agent Script</h3>
-                <div class="mb-2">
-                    <select id="test-file-dropdown" class="form-select test-file-dropdown mb-2">
-                        <option value="">-- Select a test file --</option>
-                        <!-- Test files will be populated here -->
-                    </select>
-                    <div class="d-flex flex-wrap">
-                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic</button>
-                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot</button>
-                        <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form</button>
+                
+                <!-- Computer Use Mode Panel -->
+                <div class="computer-use-panel">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h4><span class="status-indicator"></span> Computer Use Mode</h4>
+                        <span class="badge bg-success">Active</span>
+                    </div>
+                    <p class="small mb-2">The AI can see the screen and perform actions automatically</p>
+                    <div class="d-flex justify-content-between small text-muted mb-1">
+                        <span>Status:</span>
+                        <span id="computer-use-status">Waiting for task...</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div id="computer-use-progress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 10%"></div>
                     </div>
                 </div>
-                <div class="editor-container">
-                    <textarea id="code-editor"></textarea>
+                
+                <!-- Toggle for Developer Tools -->
+                <div class="d-flex justify-content-between align-items-center mt-3 mb-2">
+                    <button class="btn btn-sm btn-outline-secondary developer-tools-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#developerTools" aria-expanded="false" aria-controls="developerTools">
+                        <i class="bi bi-gear-fill me-1"></i> Advanced Developer Tools
+                    </button>
                 </div>
-                <div class="d-flex mt-2">
-                    <button id="run-btn" class="btn btn-primary run-btn w-50 me-2">Create Agent</button>
-                    <button id="execute-btn" class="btn btn-success run-btn w-50" disabled>Run Agent</button>
+                
+                <!-- Collapsible Developer Tools Section -->
+                <div class="collapse" id="developerTools">
+                    <h3>Agent Script</h3>
+                    <div class="mb-2">
+                        <div class="d-flex align-items-center mb-2">
+                            <select id="test-file-dropdown" class="form-select form-select-sm flex-grow-1 me-2">
+                                <option value="">-- Select a template --</option>
+                                <!-- Test files will be populated here -->
+                            </select>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#exampleButtonsContainer" aria-expanded="false">
+                                <i class="bi bi-three-dots"></i>
+                            </button>
+                        </div>
+                        <div id="exampleButtonsContainer" class="collapse mb-2">
+                            <div class="d-flex flex-wrap">
+                                <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('basic')">Basic</button>
+                                <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('screenshot')">Screenshot</button>
+                                <button class="btn btn-sm btn-outline-secondary example-btn" onclick="loadExample('form')">Form</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="editor-container">
+                        <textarea id="code-editor"></textarea>
+                    </div>
+                    <div class="d-flex mt-2">
+                        <button id="run-btn" class="btn btn-primary btn-sm run-btn w-50 me-2">Create Agent</button>
+                        <button id="execute-btn" class="btn btn-success btn-sm run-btn w-50" disabled>Run Agent</button>
+                    </div>
+                    <h3>Agent Steps</h3>
+                    <div class="step-list" id="step-list">
+                        <div class="text-muted">No steps parsed yet. Click "Create Agent" to extract steps from your agent script.</div>
+                    </div>
+                    <div class="step-controls">
+                        <button id="step-next" class="btn btn-sm btn-outline-primary step-btn" disabled>Next Step</button>
+                        <button id="run-all" class="btn btn-sm btn-outline-success step-btn" disabled>Run All</button>
+                        <button id="reset-steps" class="btn btn-sm btn-outline-warning step-btn" disabled>Reset</button>
+                    </div>
                 </div>
-                <h3>Agent Steps</h3>
-                <div class="step-list" id="step-list">
-                    <div class="text-muted">No steps parsed yet. Click "Create Agent" to extract steps from your agent script.</div>
-                </div>
-                <div class="step-controls">
-                    <button id="step-next" class="btn btn-sm btn-primary step-btn" disabled>Run Next Step</button>
-                    <button id="run-all" class="btn btn-sm btn-success step-btn" disabled>Run All Steps</button>
-                    <button id="reset-steps" class="btn btn-sm btn-warning step-btn" disabled>Reset</button>
-                </div>
+                
                 <h3>Output</h3>
                 <div class="output-container" id="output"></div>
             </div>
@@ -349,11 +498,13 @@
     
     <!-- Socket.io -->
     <script src="/socket.io/socket.io.js"></script>
-    <!-- CodeMirror -->
+    <!-- CodeMirror and libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
-    <!-- Bootstrap -->
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Agent Command Center JS -->
+    <script src="/js/agent-command-center.js"></script>
     
     <script>
         // Initialize CodeMirror
@@ -1620,6 +1771,56 @@ test('${site} test', async ({ page }) => {
         document.getElementById('human-handoff-cancel').addEventListener('click', () => {
             socket.emit('human-handoff-cancel');
             document.getElementById('human-handoff-modal').style.display = 'none';
+        });
+
+        // Computer Use Mode status updates
+        function updateComputerUseStatus(status, progress = null) {
+            const statusElement = document.getElementById('computer-use-status');
+            const progressElement = document.getElementById('computer-use-progress');
+            
+            if (statusElement) {
+                statusElement.textContent = status;
+            }
+            
+            if (progressElement && progress !== null) {
+                progressElement.style.width = `${progress}%`;
+            }
+        }
+        
+        // Listen for socket events related to Computer Use
+        socket.on('task-status-changed', function(data) {
+            if (data.status === 'running') {
+                updateComputerUseStatus('Executing task...', 45);
+            } else if (data.status === 'completed') {
+                updateComputerUseStatus('Task completed', 100);
+            } else if (data.status === 'failed') {
+                updateComputerUseStatus('Task failed: ' + (data.error || 'Unknown error'), 100);
+            }
+        });
+        
+        socket.on('task-thinking', function(data) {
+            updateComputerUseStatus('Thinking: ' + data.thinking.substring(0, 30) + '...', 30);
+        });
+        
+        socket.on('task-action', function(data) {
+            const actionType = data.action.type || 'action';
+            updateComputerUseStatus(`Performing ${actionType}...`, 60);
+        });
+        
+        socket.on('task-screenshot', function(data) {
+            updateComputerUseStatus('Analyzing screen...', 40);
+        });
+        
+        // Initialize with default status
+        document.addEventListener('DOMContentLoaded', function() {
+            // Default state: hide developer tools
+            const developerTools = document.getElementById('developerTools');
+            if (developerTools) {
+                developerTools.classList.remove('show');
+            }
+            
+            // Set initial Computer Use status
+            updateComputerUseStatus('Waiting for task...', 10);
         });
     </script>
 </body>

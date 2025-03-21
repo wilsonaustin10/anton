@@ -405,6 +405,7 @@ function hideValidationUI() {
 // Check for similar tasks before executing
 async function checkForSimilarTasks(taskDescription) {
   try {
+    console.debug('Checking for similar tasks...');
     const response = await fetch('/api/computer-use/similar-tasks', {
       method: 'POST',
       headers: {
@@ -413,19 +414,16 @@ async function checkForSimilarTasks(taskDescription) {
       body: JSON.stringify({ taskDescription })
     });
     
-    if (!response.ok) {
-      // Proceed with execution if API fails
-      executeComputerUseTask(taskDescription);
-      return;
-    }
     
     const result = await response.json();
     
-    if (result.tasks && result.tasks.length > 0) {
+    if (response.ok && result.tasks && result.tasks.length > 0) {
       // Show similar tasks
+      console.debug("Similar tasks found, displaying...");
       displaySimilarTasks(result.tasks, taskDescription);
     } else {
       // No similar tasks, proceed with execution
+      console.debug("No similar tasks found, proceeding with execution...");
       executeComputerUseTask(taskDescription);
     }
   } catch (error) {
