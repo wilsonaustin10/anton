@@ -247,6 +247,13 @@ class ActionExecutor {
     const response = await page.goto(url, options);
     console.log(`Navigated to: ${url}`);
     
+    // Emit event to update client browser iframe
+    // This allows the UI iframe to stay in sync with the Computer Use browser
+    if (global.io) {
+      global.io.emit('browser-url-change', { url });
+      console.log(`Emitted browser-url-change event to update client iframe: ${url}`);
+    }
+    
     return { 
       url,
       status: response ? response.status() : null,

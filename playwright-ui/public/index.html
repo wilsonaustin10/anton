@@ -958,6 +958,7 @@ test('Basic test', async ({ page }) => {
         // Listen for URL changes from the server after navigation events
         socket.on('browser-url-change', (data) => {
             const { url } = data;
+            console.log(`Received browser-url-change event: ${url}`);
             urlInput.value = url;
             
             // Update browser history if needed
@@ -974,6 +975,13 @@ test('Basic test', async ({ page }) => {
                 
                 // Update navigation buttons
                 updateHistoryButtons();
+                
+                // Tell the browser iframe to navigate to the new URL
+                console.log(`Sending navigate message to iframe for URL: ${url}`);
+                browserFrame.contentWindow.postMessage({ 
+                    type: 'navigate', 
+                    data: { url }
+                }, '*');
             }
         });
         

@@ -24,6 +24,7 @@ const taskRepository = require('./src/computer-use/task-repository');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+global.io = io;  // Make io available globally for components like ActionExecutor
 
 // Initialize Computer Use components
 const screenshotManager = new ScreenshotManager(computerUseConfig);
